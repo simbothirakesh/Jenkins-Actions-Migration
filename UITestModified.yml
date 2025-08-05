@@ -1,0 +1,134 @@
+name: MeinService - UI Test - Process Entry RQA
+
+on:
+  workflow_dispatch:
+    inputs:
+      envChoice:
+        description: 'Please select environment'
+        required: true
+        default: 'RQA'
+        type: choice
+        options:
+          - RQA
+          - TL
+
+  schedule:
+    - cron: '0 17 * * 0-4'
+    - cron: '0 23 * * 0-4'
+
+  push:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: arc-small-container
+
+    container:
+      image: docker.artifactory.com/markhobson/maven-chrome:jdk-11
+
+    env:
+      CHROME_DRIVER: "/usr/bin/chromedriver"
+      HTTPS_PROXY: "http://b2b-http.com:8080"
+      HTTP_PROXY: "http://b2b-http.com:8080"
+      ENV_CHOICE: ${{ github.event.inputs.envChoice || 'RQA' }}
+      MEINSERVICE_CREDENTIALS_RQA: ${{ secrets.MEINSERVICE_RQA_PROPERTIES_BASE64 }}
+      MEINSERVICE_CREDENTIALS_TL: ${{ secrets.MEINSERVICE_TL_PROPERTIES_BASE64 }}
+      MEINSERVICE_CREDENTIALS_LOGIN_AS: ${{ secrets.MEINSERVICE_LOGINAS_PROPERTIES }}
+      CONNECTION_FILE_FOR_AKBM_TL: ${{ secrets.MEINSERVICE_AKBM_TL_BASE64 }}
+      CONNECTION_FILE_FOR_AKBM_RQA: ${{ secrets.MEINSERVICE_AKBM_RQA_BASE64 }}
+      CONNECTION_FILE_FOR_AKBM_TL_TROUBLE_SHOOTING: ${{ secrets.MEINSERVICE_AKBM_TL_TROUBLESHOOTING_BASE64 }}
+      CONNECTION_FILE_FOR_KAUFLAND: ${{ secrets.MEINSERVICE_KAUFLAND_BASE64 }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: gradle
+
+      - name: Create directories
+        run: |
+          mkdir -p ./src/test/resources
+          mkdir -p ./src/main/resources/akbm
+          mkdir -p ./src/main/resources/kaufland
+          mkdir -p ./gradletmp report screenshots logs
+
+      - name: Setup test configuration files
+        run: |
+          echo "Running tests in environment: $ENV_CHOICE"
+          if [ "$ENV_CHOICE" = "RQA" ]; then
+            echo "$MEINSERVICE_CREDENTIALS_RQA" | base64 -d > ./src/test/resources/test.properties
+            echo "$CONNECTION_FILE_FOR_AKBM_RQA" | base64 -d > ./src/main/resources/akbm/akbm_rqa.ppk
+          elif [ "$ENV_CHOICE" = "TL" ]; then
+            echo "$MEINSERVICE_CREDENTIALS_TL" | base64 -d > ./src/test/resources/test.properties
+            echo "$CONNECTION_FILE_FOR_AKBM_TL" | base64 -d > ./src/main/resources/akbm/akbm_tl.ppk
+            echo "$CONNECTION_FILE_FOR_AKBM_TL_TROUBLE_SHOOTING" | base64 -d > ./src/main/resources/akbm/TL-MEINSERVICE-DWH.ppk
+          fi
+          echo "$CONNECTION_FILE_FOR_KAUFLAND" | base64 -d > ./src/main/resources/kaufland/MEINSERVICE_TL_OSCA.ppk
+          echo "$MEINSERVICE_CREDENTIALS_LOGIN_AS" > ./src/test/resources/loginAs.properties
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Clean gradle cache
+        run: ./gradlew --gradle-user-home ./gradletmp clean
+
+      - name: Run tests with retry
+        run: |
+          echo "Running Gradle tests"
+          for i in {1..2}; do
+            ./gradlew --gradle-user-home ./gradletmp --build-cache test -PmasterPassword=${{ secrets.MEINSERVICE_MASTER_PASSWORD }} --stacktrace && break || sleep 10
+          done
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-artifacts
+          path: |
+            report/*
+            screenshots/*
+            logs/*
+            build/test-results/**/*.xml
+            build/reports/tests/test/*
+          if-no-files-found: ignore
+          retention-days: 15
+
+      - name: Send success notification
+        if: success()
+        uses: dawidd6/action-send-mail@v5
+        with:
+          server_address: ${{ secrets.EMAIL_SERVER_ADDRESS }}
+          server_port: ${{ secrets.EMAIL_SERVER_PORT }}
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          from: 'noreply@'
+          subject: 'MEINSERVICE QS: "${{ env.ENV_CHOICE }}" Success - ${{ github.repository }}'
+          html_body: |
+            <b>Project:</b> ${{ github.repository }}<br>
+            <b>Build Number:</b> ${{ github.run_number }}<br>
+            <b>Build URL:</b> <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">Click here</a>
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          timeout: 120
+
+      - name: Send failure notification
+        if: failure()
+        uses: dawidd6/action-send-mail@v5
+        with:
+          server_address: ${{ secrets.EMAIL_SERVER_ADDRESS }}
+          server_port: ${{ secrets.EMAIL_SERVER_PORT }}
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          from: 'noreply@'
+          subject: 'MEINSERVICE QS: "${{ env.ENV_CHOICE }}" Failed - ${{ github.repository }}'
+          html_body: |
+            <b>Project:</b> ${{ github.repository }}<br>
+            <b>Build Number:</b> ${{ github.run_number }}<br>
+            <b>Build URL:</b> <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">Click here</a>
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          timeout: 120
