@@ -1,0 +1,116 @@
+name: Fortify Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      Zielumgebung:
+        description: 'Target Environment (RQA or TL)'
+        required: true
+        default: 'TL'
+
+jobs:
+  fortify:
+    runs-on: ubuntu-latest # or self-hosted if needed
+    container:
+      image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
+      options: --memory=4g
+
+    env:
+      HOME: /opt/fortify
+      PATH: /opt/fortify/bin:${{ env.PATH }}
+      SCA_VM_OPTS: -Xmx2750M
+      JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set Environment Credentials
+      id: env-vars
+      run: |
+        if [[ "${{ github.event.inputs.Zielumgebung }}" == "RQA" ]]; then
+          echo "user=${{ secrets.RQA_USER }}" >> $GITHUB_OUTPUT
+          echo "password=${{ secrets.RQA_PASS }}" >> $GITHUB_OUTPUT
+          echo "token=${{ secrets.RQA_TOKEN }}" >> $GITHUB_OUTPUT
+        else
+          echo "user=${{ secrets.TL_USER }}" >> $GITHUB_OUTPUT
+          echo "password=${{ secrets.TL_PASS }}" >> $GITHUB_OUTPUT
+          echo "token=${{ secrets.TL_TOKEN }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Show Java & Ant Version
+      run: |
+        java -version
+        chmod +x ./tools/apache-ant/apache-ant-1.10.12/bin/ant
+        ./tools/apache-ant/apache-ant-1.10.12/bin/ant -version
+
+    - name: Retrieve Code and Packages
+      run: |
+        ./tools/apache-ant/apache-ant-1.10.12/bin/ant \
+          -Dsf.username=${{ steps.env-vars.outputs.user }} \
+          -Dsf.password=${{ steps.env-vars.outputs.password }} \
+          -buildfile ./config/build.xml \
+          -propertyfile ./config/build.properties retrieveCodeAndPackages
+        ls -latr ./code
+
+    - name: Retrieve SObjects via sf_extractor
+      run: |
+        java -Dhttp.proxyHost=b2b-http.fpl.com -Dhttp.proxyPort=8080 \
+          -jar ./tools/sf-extractor/sf_extractor.jar \
+          -username ${{ steps.env-vars.outputs.user }} \
+          -password ${{ steps.env-vars.outputs.password }} \
+          -token ${{ steps.env-vars.outputs.token }} \
+          -org y
+        ls -latr .
+
+    - name: Cleanup unwanted files
+      run: |
+        find code -name '*Test.cls*' -delete
+        find code -name 'TEST_*.cls*' -delete
+        find code -name 'Test_*.cls*' -delete
+        find code -name '*Exception.cls*' -delete
+        find code -name '*.xml*' -delete
+        find code -name '*.resource' -delete
+        find code -name 'InboundEmailI*.cls*' -delete
+
+    - name: Prepare Fortify Scan
+      run: |
+        mkdir -p target/fortify
+        sourceanalyzer -version -b meinservice-${{ github.run_id }} -clean
+        sourceanalyzer -version -b meinservice-${{ github.run_id }} -debug -verbose \
+          -logfile target/fortify/translate.log \
+          -apex code/**/* -apex-sobject-path ./sobjects.json
+        sourceanalyzer -b meinservice-${{ github.run_id }} -show-files
+        sourceanalyzer -b meinservice-${{ github.run_id }} -debug -verbose \
+          -logfile target/fortify/scan.log -scan \
+          -f target/fortify/scan.fpr \
+          -build-project meinservice -build-version ${{ github.run_id }}
+
+    - name: Generate Fortify Reports
+      run: |
+        BIRTReportGenerator \
+          -template 'OWASP Top 10' \
+          --SecurityIssueDetails --IncludeDescOfKeyTerminology --UseFortifyPriorityOrder \
+          -source target/fortify/scan.fpr -format pdf \
+          --Version 'OWASP Top 10 2017' -output FortifyReport.pdf
+
+        FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -queryAll -outputFormat CSV > issues.csv
+        FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -query "[fortify priority order]:critical" -outputFormat CSV > critical.csv
+        FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -query "[fortify priority order]:high" -outputFormat CSV > high.csv
+        FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -query "[fortify priority order]:low" -outputFormat CSV > low.csv
+        FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -query "[fortify priority order]:medium" -outputFormat CSV > medium.csv
+
+        java -jar ./tools/csv-to-excel/exceliser.jar low.csv medium.csv high.csv critical.csv fpl-audit.xlsx ${{ github.event.inputs.Zielumgebung }}
+
+    - name: Upload Fortify Report Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: fortify-scan-artifacts
+        path: |
+          FortifyReport.pdf
+          issues.csv
+          high.csv
+          medium.csv
+          low.csv
+          critical.csv
+          fpl-audit.xlsx
