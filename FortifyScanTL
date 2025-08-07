@@ -1,0 +1,150 @@
+pipeline {
+    agent {
+		kubernetes {
+			cloud 'prod-prg'
+			inheritFrom 'jenkins-slave-prg'
+			customWorkspace "jobs/${env.BUILD_NUMBER}"
+			yamlFile 'agent.yaml'
+		}
+	}
+	
+	stages {
+        stage('FORTIFY SCAN') {
+			environment {
+				HOME = "/opt/fortify"
+				PATH = "/opt/fortify/bin:$PATH"
+				SCA_VM_OPTS = "-Xmx2750M" // This should be 2/3 of your memory limit for the fortify container
+				JAVA_TOOL_OPTIONS = "-Duser.home=/opt/fortify"
+			}
+            steps {
+                script {
+                    container('fortify') {
+                        fileOperations([
+                                // Clean the whole jenkins job workspace on fortify-agent
+                                folderDeleteOperation('.')
+                        ])
+						
+
+                        // checkout relevant meinservice sources on fortify agent
+                        checkout([$class                           : 'GitSCM',
+                                  branches                         : [[name: '*/master']],
+                                  doGenerateSubmoduleConfigurations: false,
+                                  extensions                       : [],
+                                  submoduleCfg                     : [],
+                                  userRemoteConfigs                : [[credentialsId: 'MS-Jenkins-App',
+                                                                       url          : 'https://git.dhl.com/MeinService/FortifyScanTL.git']]
+                        ])
+
+						sh "java -version"
+						sh "chmod 755 ./tools/apache-ant/apache-ant-1.10.12/bin/ant"
+						sh "./tools/apache-ant/apache-ant-1.10.12/bin/ant -version"
+						
+						def currentEnvironment = "";
+						if("$params.Zielumgebung" == "RQA") {
+							currentEnvironment = "RQA";
+							withCredentials([string(credentialsId: 'meinservice-rqa-token', variable: 'token'),
+											 usernamePassword(credentialsId: 'meinservice-rqa-user', usernameVariable: 'user', passwordVariable: 'password')]) {
+								sh "./tools/apache-ant/apache-ant-1.10.12/bin/ant -Dsf.username=$user -Dsf.password=$password -buildfile ./config/build.xml -propertyfile ./config/build.properties retrieveCodeAndPackages"
+								sh "ls -latr ./code"
+							}
+						
+							withCredentials([string(credentialsId: 'meinservice-rqa-token', variable: 'token'),
+											 usernamePassword(credentialsId: 'meinservice-rqa-user', usernameVariable: 'user', passwordVariable: 'password')]) {
+								sh "java -Dhttp.proxyHost=b2b-http.dhl.com -Dhttp.proxyPort=8080 -jar ./tools/sf-extractor/sf_extractor.jar -username $user -password $password -token $token -org y"
+								sh "ls -latr ."
+							}	
+						} else if("$params.Zielumgebung" == "TL") {
+							currentEnvironment = "TL";
+							withCredentials([string(credentialsId: 'meinservice-tl-token', variable: 'token'),
+						                     usernamePassword(credentialsId: 'meinservice-tl-user', usernameVariable: 'user', passwordVariable: 'password')]) {
+							    sh "./tools/apache-ant/apache-ant-1.10.12/bin/ant -Dsf.username=$user -Dsf.password=$password -buildfile ./config/build.xml -propertyfile ./config/build.properties retrieveCodeAndPackages"
+							    sh "ls -latr ./code"
+						    }
+						
+						    withCredentials([string(credentialsId: 'meinservice-tl-token', variable: 'token'),
+						                     usernamePassword(credentialsId: 'meinservice-tl-user', usernameVariable: 'user', passwordVariable: 'password')]) {
+							    sh "java -Dhttp.proxyHost=b2b-http.dhl.com -Dhttp.proxyPort=8080 -jar ./tools/sf-extractor/sf_extractor.jar -username $user -password $password -token $token -org y"
+							    sh "ls -latr ."
+						    }			
+						}
+						
+						
+						// Remove all test files from fortify scan
+                        fileOperations([
+                                fileDeleteOperation(includes: 'code/**/**Test.cls*'),
+                                fileDeleteOperation(includes: 'code/**/**/TEST_**.cls*'),
+                                fileDeleteOperation(includes: 'code/**/**/Test_**.cls*'),
+								fileDeleteOperation(includes: 'code/**/**/**Exception.cls*'),
+                                fileDeleteOperation(includes: 'code/**/**/**.xml*'),
+								fileDeleteOperation(includes: 'code/**/**/**.resource'),
+								fileDeleteOperation(includes: 'code/**/**.resource'),
+								fileDeleteOperation(includes: 'code/**/InboundEmailI**.cls*')
+                        ])
+						
+						// Make a directory for fortify fpr file. This is necessary for asg scan
+                        sh 'mkdir -p target/fortify'
+
+                        //clean
+						sh "sourceanalyzer -version -b meinservice-${env.BUILD_ID} -clean"
+
+						//translate
+						sh "sourceanalyzer -version -b meinservice-${env.BUILD_ID} -debug -verbose -logfile target/fortify/meinservice-${env.BUILD_ID}-translate.log -apex code/**/* -apex-sobject-path ./sobjects.json"
+						
+						// show files
+						sh "sourceanalyzer -b meinservice-${env.BUILD_ID} -show-files"
+						
+						// scan for vulnerabilities
+						sh "sourceanalyzer -b meinservice-${env.BUILD_ID} -debug -verbose -logfile target/fortify/meinservice-${env.BUILD_ID}-scan.log -scan -f target/fortify/meinservice-${env.BUILD_ID}.fpr -build-project meinservice-${env.BUILD_ID} -build-version meinservice-${env.BUILD_ID}"
+						
+								
+						sh "BIRTReportGenerator -template 'OWASP Top 10' --SecurityIssueDetails --IncludeDescOfKeyTerminology " +
+                                "--UseFortifyPriorityOrder -source target/fortify/meinservice-${env.BUILD_ID}.fpr -format pdf " +
+                                "--Version 'OWASP Top 10 2017' -output FortifyReport.pdf"
+				
+						sh "FPRUtility -information -listIssues -search -queryAll -outputFormat CSV -project target/fortify/meinservice-${env.BUILD_ID}.fpr >> issues.csv"
+				
+						sh "FPRUtility -project target/fortify/meinservice-${env.BUILD_ID}.fpr -information -listIssues -search -query \"[fortify priority order]:critical\" -outputFormat CSV >> critical.csv"
+						sh "FPRUtility -project target/fortify/meinservice-${env.BUILD_ID}.fpr -information -listIssues -search -query \"[fortify priority order]:high\" -outputFormat CSV >> high.csv"
+						sh "FPRUtility -project target/fortify/meinservice-${env.BUILD_ID}.fpr -information -listIssues -search -query \"[fortify priority order]:low\" -outputFormat CSV >> low.csv"
+						sh "FPRUtility -project target/fortify/meinservice-${env.BUILD_ID}.fpr -information -listIssues -search -query \"[fortify priority order]:medium\" -outputFormat CSV >> medium.csv"
+				
+						sh "java -jar ./tools/csv-to-excel/exceliser.jar ./low.csv ./medium.csv ./high.csv ./critical.csv ./dhl-audit.xlsx $currentEnvironment"
+						
+						publishHTML target: [
+                                allowMissing         : false,
+                                alwaysLinkToLastBuild: false,
+                                keepAll              : true,
+                                reportDir            : '',
+                                reportFiles          : 'FortifyReport.pdf',
+                                reportName           : 'Fortify Scan Report PDF'
+                        ]
+			
+						publishHTML target: [
+                                allowMissing         : false,
+                                alwaysLinkToLastBuild: false,
+                                keepAll              : true,
+                                reportDir            : '',
+                                reportFiles          : 'issues.csv',
+                                reportName           : 'Issues CSV'
+                        ]
+						
+						publishHTML target: [
+                                allowMissing         : false,
+                                alwaysLinkToLastBuild: false,
+                                keepAll              : true,
+                                reportDir            : '',
+                                reportFiles          : 'dhl-audit.xlsx',
+                                reportName           : 'DHL Audit Excel'
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            archiveArtifacts artifacts: '**/*', fingerprint: false
+        }
+    }
+}
