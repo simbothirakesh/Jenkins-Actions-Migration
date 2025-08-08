@@ -28,6 +28,9 @@ jobs:
       run: |
         set -euo pipefail
 
+        DOCKER_BIN_PATH=$(which docker)
+        DOCKER_BIN_DIR=$(dirname "$DOCKER_BIN_PATH")
+
         if [[ "${{ github.event.inputs.environment }}" == "RQA" ]]; then
           SF_USER="${{ secrets.RQA_USER }}"
           SF_PASS="${{ secrets.RQA_PASS }}"
@@ -43,7 +46,7 @@ jobs:
           --network host \
           -v /var/run/docker.sock:/var/run/docker.sock \
           -v ${{ github.workspace }}:/app \
-          -v /usr/bin/docker:/usr/bin/docker \
+          -v "$DOCKER_BIN_DIR":"$DOCKER_BIN_DIR" \
           -e DOCKER_HOST=unix:///var/run/docker.sock \
           -e HOME=/opt/fortify \
           -e SCA_VM_OPTS=-Xmx2750M \
