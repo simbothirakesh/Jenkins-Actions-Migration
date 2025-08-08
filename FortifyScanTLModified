@@ -20,11 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
-      # If your registry requires auth, add credentials:
-      # credentials:
-      #   username: ${{ secrets.ART_USER }}
-      #   password: ${{ secrets.ART_PASS }}
-      options: --memory=4g
+      options: >-
+        --memory=4g
+        --network host
+        -v /var/run/docker.sock:/var/run/docker.sock
+        -e DOCKER_HOST=unix:///var/run/docker.sock
 
     env:
       HOME: /opt/fortify
@@ -34,6 +34,11 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    - name: Verify Docker connectivity
+      run: |
+        docker version
+        docker info | head -20
 
     - name: Add Fortify bin to PATH
       run: echo "/opt/fortify/bin" >> "$GITHUB_PATH"
@@ -62,7 +67,6 @@ jobs:
           echo "token=${{ secrets.TL_TOKEN }}" >> "$GITHUB_OUTPUT"
         fi
 
-    # If you want a quick smoke test first, comment this step out
     - name: Retrieve code and metadata
       shell: bash
       run: |
@@ -127,7 +131,6 @@ jobs:
 
         FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -queryAll -outputFormat CSV > issues.csv
 
-        # Optional Excel output; comment out if exceliser.jar not present
         if [[ -f ./tools/csv-to-excel/exceliser.jar ]]; then
           java -jar ./tools/csv-to-excel/exceliser.jar \
             low.csv medium.csv high.csv critical.csv fpl-audit.xlsx \
