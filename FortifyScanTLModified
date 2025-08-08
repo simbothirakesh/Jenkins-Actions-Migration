@@ -58,22 +58,89 @@ jobs:
           bash -c "
             set -euo pipefail
             
-            # Add Fortify bin to PATH immediately
             export PATH='/opt/fortify/bin:$PATH'
 
-            # Verify Docker connectivity
             echo '::group::Verify Docker Connectivity'
             which docker
             docker version
             docker info | head -20
             echo '::endgroup::'
 
-            # ... (rest of the script)
             echo '::group::Verify Fortify tools'
-            # ... (rest of Fortify verification steps)
+            which sourceanalyzer || true
+            sourceanalyzer -version || true
+            which FPRUtility || true
+            which BIRTReportGenerator || true
+            java -version
+            chmod +x ./tools/apache-ant/apache-ant-1.10.12/bin/ant
+            ./tools/apache-ant/apache-ant-1.10.12/bin/ant -version
             echo '::endgroup::'
 
-            # ... and so on for all your other steps ...
+            echo '::group::Retrieve code and metadata'
+            ./tools/apache-ant/apache-ant-1.10.12/bin/ant \
+              -Dsf.username=\"\$SF_USER\" \
+              -Dsf.password=\"\$SF_PASS\" \
+              -buildfile ./config/build.xml \
+              -propertyfile ./config/build.properties retrieveCodeAndPackages
+
+            java -Dhttp.proxyHost=b2b-http.fpl.com -Dhttp.proxyPort=8080 \
+              -jar ./tools/sf-extractor/sf_extractor.jar \
+              -username \"\$SF_USER\" \
+              -password \"\$SF_PASS\" \
+              -token \"\$SF_TOKEN\" \
+              -org y
+            echo '::endgroup::'
+
+            echo '::group::Cleanup unwanted files (tests/resources/xml)'
+            find code -name '*Test.cls*' -delete
+            find code -name 'Test_*.cls*' -delete
+            find code -name 'TEST_*.cls*' -delete
+            find code -name '*Exception.cls*' -delete
+            find code -name '*.xml*' -delete
+            find code -name '*.resource' -delete
+            find code -name 'InboundEmailI*.cls*' -delete
+            echo '::endgroup::'
+
+            echo '::group::Run Fortify translate and scan'
+            mkdir -p target/fortify
+
+            echo '::group::Fortify translate'
+            sourceanalyzer -version -b meinservice-\$GITHUB_RUN_ID -clean
+            sourceanalyzer -version -b meinservice-\$GITHUB_RUN_ID -debug -verbose \
+              -logfile target/fortify/translate.log \
+              -apex \"code/**/*\" -apex-sobject-path \"./sobjects.json\"
+            echo '::endgroup::'
+
+            echo '::group::Fortify scan'
+            sourceanalyzer -b meinservice-\$GITHUB_RUN_ID -show-files
+            sourceanalyzer -b meinservice-\$GITHUB_RUN_ID -debug -verbose \
+              -logfile target/fortify/scan.log -scan \
+              -f target/fortify/scan.fpr \
+              -build-project meinservice \
+              -build-version \"\$GITHUB_RUN_ID\"
+            echo '::endgroup::'
+            echo '::endgroup::'
+
+            echo '::group::Generate reports'
+            BIRTReportGenerator \
+              -template 'OWASP Top 10' \
+              --SecurityIssueDetails --IncludeDescOfKeyTerminology --UseFortifyPriorityOrder \
+              -source target/fortify/scan.fpr -format pdf \
+              --Version 'OWASP Top 10 2017' -output FortifyReport.pdf
+
+            for level in critical high medium low; do
+              FPRUtility -project target/fortify/scan.fpr -information -listIssues \
+                -search -query \"[fortify priority order]:\$level\" -outputFormat CSV > \"\$level.csv\"
+            done
+
+            FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -queryAll -outputFormat CSV > issues.csv
+
+            if [[ -f ./tools/csv-to-excel/exceliser.jar ]]; then
+              java -jar ./tools/csv-to-excel/exceliser.jar \
+                low.csv medium.csv high.csv critical.csv fpl-audit.xlsx \
+                \"\$FORTIFY_ENV\"
+            fi
+            echo '::endgroup::'
           "
 
     - name: Upload artifacts
