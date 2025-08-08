@@ -8,61 +8,78 @@ on:
         required: true
         default: 'TL'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: fortify-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   fortify:
     runs-on: ubuntu-latest
     container:
       image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
+      # If your registry requires auth, add credentials:
+      # credentials:
+      #   username: ${{ secrets.ART_USER }}
+      #   password: ${{ secrets.ART_PASS }}
       options: --memory=4g
 
     env:
       HOME: /opt/fortify
-      PATH: /opt/fortify/bin:${{ env.PATH }}
       SCA_VM_OPTS: -Xmx2750M
       JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
 
     steps:
-    - name: Checkout Repository
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Create Scripts Directory
-      run: mkdir -p scripts
+    - name: Add Fortify bin to PATH
+      run: echo "/opt/fortify/bin" >> "$GITHUB_PATH"
 
-    - name: Set Environment Credentials
-      id: set-creds
+    - name: Verify Fortify tools
       run: |
-        if [[ "${{ github.event.inputs.environment }}" == "RQA" ]]; then
-          echo "user=${{ secrets.RQA_USER }}" >> $GITHUB_OUTPUT
-          echo "password=${{ secrets.RQA_PASS }}" >> $GITHUB_OUTPUT
-          echo "token=${{ secrets.RQA_TOKEN }}" >> $GITHUB_OUTPUT
-        else
-          echo "user=${{ secrets.TL_USER }}" >> $GITHUB_OUTPUT
-          echo "password=${{ secrets.TL_PASS }}" >> $GITHUB_OUTPUT
-          echo "token=${{ secrets.TL_TOKEN }}" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Check Java and Ant
-      run: |
+        which sourceanalyzer || true
+        sourceanalyzer -version || true
+        which FPRUtility || true
+        which BIRTReportGenerator || true
         java -version
         chmod +x ./tools/apache-ant/apache-ant-1.10.12/bin/ant
         ./tools/apache-ant/apache-ant-1.10.12/bin/ant -version
 
-    - name: Retrieve Code and Metadata
+    - name: Set environment credentials
+      id: set-creds
+      shell: bash
+      run: |
+        if [[ "${{ github.event.inputs.environment }}" == "RQA" ]]; then
+          echo "user=${{ secrets.RQA_USER }}" >> "$GITHUB_OUTPUT"
+          echo "password=${{ secrets.RQA_PASS }}" >> "$GITHUB_OUTPUT"
+          echo "token=${{ secrets.RQA_TOKEN }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "user=${{ secrets.TL_USER }}" >> "$GITHUB_OUTPUT"
+          echo "password=${{ secrets.TL_PASS }}" >> "$GITHUB_OUTPUT"
+          echo "token=${{ secrets.TL_TOKEN }}" >> "$GITHUB_OUTPUT"
+        fi
+
+    # If you want a quick smoke test first, comment this step out
+    - name: Retrieve code and metadata
+      shell: bash
       run: |
         ./tools/apache-ant/apache-ant-1.10.12/bin/ant \
-          -Dsf.username=${{ steps.set-creds.outputs.user }} \
-          -Dsf.password=${{ steps.set-creds.outputs.password }} \
+          -Dsf.username="${{ steps.set-creds.outputs.user }}" \
+          -Dsf.password="${{ steps.set-creds.outputs.password }}" \
           -buildfile ./config/build.xml \
           -propertyfile ./config/build.properties retrieveCodeAndPackages
 
         java -Dhttp.proxyHost=b2b-http.fpl.com -Dhttp.proxyPort=8080 \
           -jar ./tools/sf-extractor/sf_extractor.jar \
-          -username ${{ steps.set-creds.outputs.user }} \
-          -password ${{ steps.set-creds.outputs.password }} \
-          -token ${{ steps.set-creds.outputs.token }} \
+          -username "${{ steps.set-creds.outputs.user }}" \
+          -password "${{ steps.set-creds.outputs.password }}" \
+          -token "${{ steps.set-creds.outputs.token }}" \
           -org y
 
-    - name: Remove Unwanted Files
+    - name: Cleanup unwanted files (tests/resources/xml)
       run: |
         find code -name '*Test.cls*' -delete
         find code -name 'Test_*.cls*' -delete
@@ -72,20 +89,30 @@ jobs:
         find code -name '*.resource' -delete
         find code -name 'InboundEmailI*.cls*' -delete
 
-    - name: Run Fortify Scan
+    - name: Run Fortify translate and scan
+      shell: bash
       run: |
+        set -euo pipefail
         mkdir -p target/fortify
+
+        echo "::group::Fortify translate"
         sourceanalyzer -version -b meinservice-${{ github.run_id }} -clean
         sourceanalyzer -version -b meinservice-${{ github.run_id }} -debug -verbose \
           -logfile target/fortify/translate.log \
-          -apex code/**/* -apex-sobject-path ./sobjects.json
+          -apex "code/**/*" -apex-sobject-path "./sobjects.json"
+        echo "::endgroup::"
+
+        echo "::group::Fortify scan"
         sourceanalyzer -b meinservice-${{ github.run_id }} -show-files
         sourceanalyzer -b meinservice-${{ github.run_id }} -debug -verbose \
           -logfile target/fortify/scan.log -scan \
           -f target/fortify/scan.fpr \
-          -build-project meinservice -build-version ${{ github.run_id }}
+          -build-project meinservice \
+          -build-version "${{ github.run_id }}"
+        echo "::endgroup::"
 
-    - name: Generate Reports
+    - name: Generate reports
+      shell: bash
       run: |
         BIRTReportGenerator \
           -template 'OWASP Top 10' \
@@ -95,13 +122,19 @@ jobs:
 
         for level in critical high medium low; do
           FPRUtility -project target/fortify/scan.fpr -information -listIssues \
-            -search -query "[fortify priority order]:$level" -outputFormat CSV > $level.csv
+            -search -query "[fortify priority order]:$level" -outputFormat CSV > "$level.csv"
         done
 
         FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -queryAll -outputFormat CSV > issues.csv
-        java -jar ./tools/csv-to-excel/exceliser.jar low.csv medium.csv high.csv critical.csv fpl-audit.xlsx ${{ github.event.inputs.environment }}
 
-    - name: Upload Fortify Artifacts
+        # Optional Excel output; comment out if exceliser.jar not present
+        if [[ -f ./tools/csv-to-excel/exceliser.jar ]]; then
+          java -jar ./tools/csv-to-excel/exceliser.jar \
+            low.csv medium.csv high.csv critical.csv fpl-audit.xlsx \
+            "${{ github.event.inputs.environment }}"
+        fi
+
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: fortify-scan-reports
@@ -112,6 +145,9 @@ jobs:
           high.csv
           medium.csv
           low.csv
+          target/fortify/translate.log
+          target/fortify/scan.log
+          target/fortify/scan.fpr
           fpl-audit.xlsx
-        if-no-files-found: error
+        if-no-files-found: warn
         retention-days: 30
