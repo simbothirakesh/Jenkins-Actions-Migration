@@ -1,4 +1,4 @@
-name: Fortify Scan - Salesforce (Repo Only)
+name: Fortify Scan - Salesforce
 
 on:
   workflow_dispatch:
