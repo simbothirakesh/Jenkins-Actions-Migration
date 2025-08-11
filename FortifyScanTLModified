@@ -1,4 +1,4 @@
-name: Fortify Scan - Salesforce
+name: Fortify Scan - Salesforce (Repo Only)
 
 on:
   workflow_dispatch:
@@ -61,6 +61,8 @@ jobs:
         run: |
           which sourceanalyzer
           sourceanalyzer -version
+          which FPRUtility
+          which BIRTReportGenerator
 
       - name: Fortify Translate
         shell: bash
@@ -82,12 +84,20 @@ jobs:
           for level in critical high medium low; do
             FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -query "[fortify priority order]:$level" -outputFormat CSV > "${level}.csv"
           done
+          FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -queryAll -outputFormat CSV > issues.csv
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Generate PDF report
+        run: |
+          BIRTReportGenerator -template 'OWASP Top 10' --SecurityIssueDetails --IncludeDescOfKeyTerminology --UseFortifyPriorityOrder \
+            -source target/fortify/scan.fpr -format pdf --Version 'OWASP Top 10 2017' -output FortifyReport.pdf
+
+      - name: Upload artifacts (GHES-compatible)
+        uses: actions/upload-artifact@v3
         with:
           name: fortify-results-${{ github.event.inputs.environment }}
           path: |
+            FortifyReport.pdf
+            issues.csv
             critical.csv
             high.csv
             medium.csv
@@ -96,3 +106,16 @@ jobs:
             target/fortify/scan.log
             target/fortify/scan.fpr
           retention-days: 30
+
+      - name: Run summary with download pointers
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Fortify results (${GITHUB_EVENT_INPUTS_ENVIRONMENT:-${{ github.event.inputs.environment }}})"
+            echo "- **PDF:** FortifyReport.pdf"
+            echo "- **CSVs:** critical.csv, high.csv, medium.csv, low.csv, issues.csv"
+            echo "- **FPR:** target/fortify/scan.fpr"
+            echo ""
+            echo "_Use the **Artifacts** panel for direct downloads from this run._"
+          } >> "$GITHUB_STEP_SUMMARY"
