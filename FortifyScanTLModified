@@ -1,4 +1,4 @@
-name: Fortify Scan - Salesforce (Repo Only)
+name: Fortify Scan
 
 on:
   workflow_dispatch:
@@ -28,11 +28,10 @@ jobs:
       HOME: /opt/fortify
       SCA_VM_OPTS: -Xmx2750M
       JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
-      BUILD_ID: salesforce-${{ github.run_id }}
-      SRC_GLOBS: 'force-app/**/* code/**/* src/**/*'
+      BUILD_ID: meinservice-${{ github.run_id }}
 
     steps:
-      # Some stripped images lack tar/git; install in a portable way.
+      # Minimal base utils for checkout
       - name: Install prerequisites (tar, git)
         shell: bash
         run: |
@@ -56,39 +55,59 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Add Fortify bin to PATH
-        run: echo "/opt/fortify/bin" >> "$GITHUB_PATH"
-
-      - name: Validate source exists
+      # Discover Fortify install path and expose it (no hard-coded paths)
+      - name: Discover Fortify path
+        id: fortify
         shell: bash
         run: |
-          if ! echo "$SRC_GLOBS" | xargs -I{} sh -lc 'ls -1d {} 2>/dev/null' | grep -q .; then
-            echo "::error::No source found under: $SRC_GLOBS. Update SRC_GLOBS to match your repo."
+          SA_BIN="$(command -v sourceanalyzer || true)"
+          if [ -z "$SA_BIN" ]; then
+            echo "::error::sourceanalyzer not found in PATH inside the container."
             exit 1
           fi
-          echo "Sampling paths:"
-          echo "$SRC_GLOBS" | xargs -I{} sh -lc 'ls -1d {} 2>/dev/null' | head -n 10
+          FORTIFY_BIN_DIR="$(dirname "$SA_BIN")"
+          echo "bin=$FORTIFY_BIN_DIR" >> "$GITHUB_OUTPUT"
+          echo "Fortify bin: $FORTIFY_BIN_DIR"
+          echo "$FORTIFY_BIN_DIR" >> "$GITHUB_PATH"
 
-      - name: Fortify Translate
+      - name: Validate repo-root metadata presence
+        shell: bash
+        run: |
+          echo "Repo root contents (top-level):"
+          ls -la | sed -n '1,80p'
+          # Not mandatory, but helpful if you keep sobjects.json at root
+          if [ -f "./sobjects.json" ]; then
+            echo "Found sobjects.json at repo root."
+          else
+            echo "No sobjects.json at root — proceeding without it."
+          fi
+
+      - name: Fortify Translate (scan from repo root)
         shell: bash
         run: |
           mkdir -p target/fortify
           sourceanalyzer -b "$BUILD_ID" -clean || true
+          # Scan all metadata from repo root; no subfolder like force-app/ or code/
           if [ -f "./sobjects.json" ]; then
-            sourceanalyzer -b "$BUILD_ID" -apex $SRC_GLOBS -apex-sobject-path "./sobjects.json" \
+            sourceanalyzer -b "$BUILD_ID" \
+              -apex "./**/*" \
+              -apex-sobject-path "./sobjects.json" \
               -logfile target/fortify/translate.log
           else
-            sourceanalyzer -b "$BUILD_ID" -apex $SRC_GLOBS \
+            sourceanalyzer -b "$BUILD_ID" \
+              -apex "./**/*" \
               -logfile target/fortify/translate.log
           fi
 
       - name: Fortify Scan
+        shell: bash
         run: |
           sourceanalyzer -b "$BUILD_ID" -scan \
             -f target/fortify/scan.fpr \
             -logfile target/fortify/scan.log
 
       - name: Generate CSVs (critical/high/medium/low)
+        shell: bash
         run: |
           for level in critical high medium low; do
             FPRUtility -project target/fortify/scan.fpr \
@@ -97,10 +116,10 @@ jobs:
               -outputFormat CSV > "${level}.csv"
           done
 
-      - name: Upload results
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: fortify-results-${{ github.event.inputs.environment }}
+          name: fortify-scan-reports-${{ github.event.inputs.environment }}
           path: |
             critical.csv
             high.csv
@@ -109,4 +128,5 @@ jobs:
             target/fortify/translate.log
             target/fortify/scan.log
             target/fortify/scan.fpr
+          if-no-files-found: warn
           retention-days: 30
