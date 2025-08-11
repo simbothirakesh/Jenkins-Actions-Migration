@@ -1,4 +1,4 @@
-name: Fortify Scan - Salesforce
+name: Fortify Scan - Salesforce (Repo Root)
 
 on:
   workflow_dispatch:
@@ -47,9 +47,19 @@ jobs:
             echo "No supported package manager found"; exit 1
           fi
 
-      - name: Checkout repository
+      - name: Determine branch
+        id: branch
+        run: |
+          if [[ "${{ github.event.inputs.environment }}" == "RQA" ]]; then
+            echo "branch=RQA" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch=TL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository (branch-specific)
         uses: actions/checkout@v4
         with:
+          ref: ${{ steps.branch.outputs.branch }}
           fetch-depth: 1
           persist-credentials: false
 
