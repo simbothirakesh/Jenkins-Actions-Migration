@@ -1,4 +1,4 @@
-name: Fortify Scan - By Branch
+name: Fortify Scan - Salesforce
 
 on:
   workflow_dispatch:
@@ -29,8 +29,6 @@ jobs:
       JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
       BUILD_ID: salesforce-${{ github.run_id }}
       SRC_GLOBS: '.'
-      BRANCH_RQA: RQA
-      BRANCH_TL: TL
 
     steps:
       - name: Install prerequisites
@@ -49,32 +47,26 @@ jobs:
             echo "No supported package manager found"; exit 1
           fi
 
-      - name: Select branch
-        id: pick
-        shell: bash
-        run: |
-          if [ "${{ github.event.inputs.environment }}" = "RQA" ]; then
-            echo "ref=${BRANCH_RQA}" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=${BRANCH_TL}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.pick.outputs.ref }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Add Fortify bin to PATH
-        run: echo "/opt/fortify/bin" >> "$GITHUBPATH" && echo "/opt/fortify/bin" >> "$GITHUB_PATH"
+        shell: bash
+        run: |
+          set -e
+          test -d /opt/fortify/bin || { echo "::error::/opt/fortify/bin not found"; ls -la /opt || true; exit 1; }
+          echo "/opt/fortify/bin" >> "$GITHUB_PATH"
+          which sourceanalyzer || true
 
       - name: Verify Fortify CLI
         run: |
           which sourceanalyzer
           sourceanalyzer -version
-          which FPRUtility
-          which BIRTReportGenerator
+          which FPRUtility || true
+          which BIRTReportGenerator || true
 
       - name: Fortify Translate
         shell: bash
@@ -96,38 +88,26 @@ jobs:
           for level in critical high medium low; do
             FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -query "[fortify priority order]:$level" -outputFormat CSV > "${level}.csv"
           done
-          FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -queryAll -outputFormat CSV > issues.csv
 
       - name: Generate PDF report
         run: |
-          BIRTReportGenerator -template 'OWASP Top 10' --SecurityIssueDetails --IncludeDescOfKeyTerminology --UseFortifyPriorityOrder \
-            -source target/fortify/scan.fpr -format pdf --Version 'OWASP Top 10 2017' -output FortifyReport.pdf
+          if command -v BIRTReportGenerator >/dev/null 2>&1; then
+            BIRTReportGenerator -template 'OWASP Top 10' --SecurityIssueDetails --IncludeDescOfKeyTerminology --UseFortifyPriorityOrder -source target/fortify/scan.fpr -format pdf --Version 'OWASP Top 10 2017' -output FortifyReport.pdf
+          else
+            echo "BIRTReportGenerator not available; skipping PDF"
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: fortify-results-${{ github.event.inputs.environment }}-${{ steps.pick.outputs.ref }}
+          name: fortify-results-${{ github.event.inputs.environment }}
           path: |
-            FortifyReport.pdf
-            issues.csv
             critical.csv
             high.csv
             medium.csv
             low.csv
+            FortifyReport.pdf
             target/fortify/translate.log
             target/fortify/scan.log
             target/fortify/scan.fpr
           retention-days: 30
-
-      - name: Run summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "## Fortify results for branch: \`${{ steps.pick.outputs.ref }}\`"
-            echo "- PDF: FortifyReport.pdf"
-            echo "- CSVs: critical.csv, high.csv, medium.csv, low.csv, issues.csv"
-            echo "- FPR: target/fortify/scan.fpr"
-            echo ""
-            echo "_Use the **Artifacts** panel for downloads from this run._"
-          } >> "$GITHUB_STEP_SUMMARY"
