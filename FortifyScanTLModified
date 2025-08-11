@@ -29,7 +29,7 @@ jobs:
       SCA_VM_OPTS: -Xmx2750M
       JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
       BUILD_ID: salesforce-${{ github.run_id }}
-      SRC_GLOBS: 'force-app/**/* code/**/* src/**/*'
+      SRC_GLOBS: '.'
 
     steps:
       - name: Install prerequisites
@@ -61,14 +61,6 @@ jobs:
         run: |
           which sourceanalyzer
           sourceanalyzer -version
-
-      - name: Validate source
-        shell: bash
-        run: |
-          if ! echo "$SRC_GLOBS" | xargs -I{} sh -lc 'ls -1d {} 2>/dev/null' | grep -q .; then
-            echo "::error::No source found under: $SRC_GLOBS"; exit 1
-          fi
-          echo "$SRC_GLOBS" | xargs -I{} sh -lc 'ls -1d {} 2>/dev/null' | head -n 10
 
       - name: Fortify Translate
         shell: bash
