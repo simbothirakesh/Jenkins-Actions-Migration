@@ -1,4 +1,4 @@
-Name: Fortify Scan
+name: Fortify Scan - Salesforce
 
 on:
   workflow_dispatch:
@@ -7,159 +7,86 @@ on:
         description: 'Target Environment (RQA or TL)'
         required: true
         default: 'TL'
+        type: choice
+        options: [RQA, TL]
 
 permissions:
   contents: read
 
-concurrency:
-  group: fortify-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   fortify:
-    runs-on: arc-medium
-    
+    runs-on: arc-container-small
+    container:
+      image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
+      options: --memory=4g
+
+    env:
+      HOME: /opt/fortify
+      SCA_VM_OPTS: -Xmx2750M
+      JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
+      BUILD_ID: salesforce-${{ github.run_id }}
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Run Fortify scan in container
-      shell: bash
-      run: |
-        set -euo pipefail
+      - name: Add Fortify bin to PATH
+        run: echo "/opt/fortify/bin" >> "$GITHUB_PATH"
 
-        DOCKER_BIN_PATH=$(which docker)
-        DOCKER_BIN_DIR=$(dirname "$DOCKER_BIN_PATH")
+      - name: Set Salesforce credentials
+        id: creds
+        run: |
+          if [[ "${{ github.event.inputs.environment }}" == "RQA" ]]; then
+            echo "USER=${{ secrets.RQA_USER }}" >> $GITHUB_ENV
+            echo "PASS=${{ secrets.RQA_PASS }}" >> $GITHUB_ENV
+            echo "TOKEN=${{ secrets.RQA_TOKEN }}" >> $GITHUB_ENV
+          else
+            echo "USER=${{ secrets.TL_USER }}" >> $GITHUB_ENV
+            echo "PASS=${{ secrets.TL_PASS }}" >> $GITHUB_ENV
+            echo "TOKEN=${{ secrets.TL_TOKEN }}" >> $GITHUB_ENV
+          fi
 
-        if [[ "${{ github.event.inputs.environment }}" == "RQA" ]]; then
-          SF_USER="${{ secrets.RQA_USER }}"
-          SF_PASS="${{ secrets.RQA_PASS }}"
-          SF_TOKEN="${{ secrets.RQA_TOKEN }}"
-        else
-          SF_USER="${{ secrets.TL_USER }}"
-          SF_PASS="${{ secrets.TL_PASS }}"
-          SF_TOKEN="${{ secrets.TL_TOKEN }}"
-        fi
+      - name: Retrieve Salesforce code
+        run: |
+          java -jar ./tools/sf-extractor/sf_extractor.jar \
+            -username "$USER" \
+            -password "$PASS" \
+            -token "$TOKEN" \
+            -org y
 
-        docker run --rm \
-          --memory=4g \
-          --network host \
-          -v /var/run/docker.sock:/var/run/docker.sock \
-          -v ${{ github.workspace }}:/app \
-          -v "$DOCKER_BIN_DIR":"$DOCKER_BIN_DIR" \
-          -e DOCKER_HOST=unix:///var/run/docker.sock \
-          -e HOME=/opt/fortify \
-          -e SCA_VM_OPTS=-Xmx2750M \
-          -e JAVA_TOOL_OPTIONS=-Duser.home=/opt/fortify \
-          -e SF_USER="$SF_USER" \
-          -e SF_PASS="$SF_PASS" \
-          -e SF_TOKEN="$SF_TOKEN" \
-          -e FORTIFY_ENV="${{ github.event.inputs.environment }}" \
-          -e GITHUB_RUN_ID="${{ github.run_id }}" \
-          -w /app \
-          docker.artifactory.dhl.com/fortify/fortify-cloudscan-client:latest \
-          /bin/sh -c "
-            set -euo pipefail
-            
-            export PATH='/opt/fortify/bin:$PATH'
+      - name: Run Fortify Translate
+        run: |
+          mkdir -p target/fortify
+          sourceanalyzer -b "$BUILD_ID" -clean
+          sourceanalyzer -b "$BUILD_ID" -apex "code/**/*" \
+            -apex-sobject-path "./sobjects.json" \
+            -logfile target/fortify/translate.log
 
-            echo '::group::Verify Docker Connectivity'
-            which docker
-            docker version
-            docker info | head -20
-            echo '::endgroup::'
+      - name: Run Fortify Scan
+        run: |
+          sourceanalyzer -b "$BUILD_ID" -scan \
+            -f target/fortify/scan.fpr \
+            -logfile target/fortify/scan.log
 
-            echo '::group::Verify Fortify tools'
-            which sourceanalyzer || true
-            sourceanalyzer -version || true
-            which FPRUtility || true
-            which BIRTReportGenerator || true
-            java -version
-            chmod +x ./tools/apache-ant/apache-ant-1.10.12/bin/ant
-            ./tools/apache-ant/apache-ant-1.10.12/bin/ant -version
-            echo '::endgroup::'
+      - name: Generate CSV reports
+        run: |
+          for level in critical high medium low; do
+            FPRUtility -project target/fortify/scan.fpr \
+              -information -listIssues \
+              -search -query "[fortify priority order]:$level" \
+              -outputFormat CSV > "${level}.csv"
+          done
 
-            echo '::group::Retrieve code and metadata'
-            ./tools/apache-ant/apache-ant-1.10.12/bin/ant \
-              -Dsf.username=\"\$SF_USER\" \
-              -Dsf.password=\"\$SF_PASS\" \
-              -buildfile ./config/build.xml \
-              -propertyfile ./config/build.properties retrieveCodeAndPackages
-
-            java -Dhttp.proxyHost=b2b-http.fpl.com -Dhttp.proxyPort=8080 \
-              -jar ./tools/sf-extractor/sf_extractor.jar \
-              -username \"\$SF_USER\" \
-              -password \"\$SF_PASS\" \
-              -token \"\$SF_TOKEN\" \
-              -org y
-            echo '::endgroup::'
-
-            echo '::group::Cleanup unwanted files (tests/resources/xml)'
-            find code -name '*Test.cls*' -delete
-            find code -name 'Test_*.cls*' -delete
-            find code -name 'TEST_*.cls*' -delete
-            find code -name '*Exception.cls*' -delete
-            find code -name '*.xml*' -delete
-            find code -name '*.resource' -delete
-            find code -name 'InboundEmailI*.cls*' -delete
-            echo '::endgroup::'
-
-            echo '::group::Run Fortify translate and scan'
-            mkdir -p target/fortify
-
-            echo '::group::Fortify translate'
-            sourceanalyzer -version -b meinservice-\$GITHUB_RUN_ID -clean
-            sourceanalyzer -version -b meinservice-\$GITHUB_RUN_ID -debug -verbose \
-              -logfile target/fortify/translate.log \
-              -apex \"code/**/*\" -apex-sobject-path \"./sobjects.json\"
-            echo '::endgroup::'
-
-            echo '::group::Fortify scan'
-            sourceanalyzer -b meinservice-\$GITHUB_RUN_ID -show-files
-            sourceanalyzer -b meinservice-\$GITHUB_RUN_ID -debug -verbose \
-              -logfile target/fortify/scan.log -scan \
-              -f target/fortify/scan.fpr \
-              -build-project meinservice \
-              -build-version \"\$GITHUB_RUN_ID\"
-            echo '::endgroup::'
-            echo '::endgroup::'
-
-            echo '::group::Generate reports'
-            BIRTReportGenerator \
-              -template 'OWASP Top 10' \
-              --SecurityIssueDetails --IncludeDescOfKeyTerminology --UseFortifyPriorityOrder \
-              -source target/fortify/scan.fpr -format pdf \
-              --Version 'OWASP Top 10 2017' -output FortifyReport.pdf
-
-            for level in critical high medium low; do
-              FPRUtility -project target/fortify/scan.fpr -information -listIssues \
-                -search -query \"[fortify priority order]:\$level\" -outputFormat CSV > \"\$level.csv\"
-            done
-
-            FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -queryAll -outputFormat CSV > issues.csv
-
-            if [[ -f ./tools/csv-to-excel/exceliser.jar ]]; then
-              java -jar ./tools/csv-to-excel/exceliser.jar \
-                low.csv medium.csv high.csv critical.csv fpl-audit.xlsx \
-                \"\$FORTIFY_ENV\"
-            fi
-            echo '::endgroup::'
-          "
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: fortify-scan-reports
-        path: |
-          FortifyReport.pdf
-          issues.csv
-          critical.csv
-          high.csv
-          medium.csv
-          low.csv
-          target/fortify/translate.log
-          target/fortify/scan.log
-          target/fortify/scan.fpr
-          fpl-audit.xlsx
-        if-no-files-found: warn
-        retention-days: 30
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: fortify-results-${{ github.event.inputs.environment }}
+          path: |
+            critical.csv
+            high.csv
+            medium.csv
+            low.csv
+            target/fortify/translate.log
+            target/fortify/scan.log
+            target/fortify/scan.fpr
+          retention-days: 30
