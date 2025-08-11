@@ -25,18 +25,14 @@ jobs:
       options: --memory=4g
 
     env:
-      # Mirror Jenkins env
       HOME: /opt/fortify
       SCA_VM_OPTS: -Xmx2750M
       JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
-
-      # Fortify build + source locations (adjust globs if needed)
       BUILD_ID: salesforce-${{ github.run_id }}
       SRC_GLOBS: 'force-app/**/* code/**/* src/**/*'
 
     steps:
-      # Checkout needs tar (and sometimes git) inside slim containers
-      - name: Install prerequisites (tar, git)
+      - name: Install prerequisites
         shell: bash
         run: |
           set -e
@@ -49,62 +45,50 @@ jobs:
           elif command -v zypper >/dev/null 2>&1; then
             zypper --non-interactive install tar git
           else
-            echo "No supported package manager found; need tar for checkout."
-            exit 1
+            echo "No supported package manager found"; exit 1
           fi
 
-      - name: Checkout repository (read-only)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
           persist-credentials: false
 
-      # Add Fortify bin just like Jenkins PATH="/opt/fortify/bin:$PATH"
       - name: Add Fortify bin to PATH
         run: echo "/opt/fortify/bin" >> "$GITHUB_PATH"
 
-      - name: Verify Fortify CLI available
+      - name: Verify Fortify CLI
         run: |
-          which sourceanalyzer || { echo "sourceanalyzer not found in /opt/fortify/bin"; exit 1; }
+          which sourceanalyzer
           sourceanalyzer -version
 
-      - name: Validate source exists
+      - name: Validate source
         shell: bash
         run: |
           if ! echo "$SRC_GLOBS" | xargs -I{} sh -lc 'ls -1d {} 2>/dev/null' | grep -q .; then
-            echo "::error::No source found under: $SRC_GLOBS. Update SRC_GLOBS to match your repo."
-            exit 1
+            echo "::error::No source found under: $SRC_GLOBS"; exit 1
           fi
-          echo "Sample files to be translated:"
           echo "$SRC_GLOBS" | xargs -I{} sh -lc 'ls -1d {} 2>/dev/null' | head -n 10
 
-      - name: Fortify Translate (scan from repo root)
+      - name: Fortify Translate
         shell: bash
         run: |
           mkdir -p target/fortify
           sourceanalyzer -b "$BUILD_ID" -clean || true
           if [ -f "./sobjects.json" ]; then
-            sourceanalyzer -b "$BUILD_ID" -apex $SRC_GLOBS \
-              -apex-sobject-path "./sobjects.json" \
-              -logfile target/fortify/translate.log
+            sourceanalyzer -b "$BUILD_ID" -apex $SRC_GLOBS -apex-sobject-path "./sobjects.json" -logfile target/fortify/translate.log
           else
-            sourceanalyzer -b "$BUILD_ID" -apex $SRC_GLOBS \
-              -logfile target/fortify/translate.log
+            sourceanalyzer -b "$BUILD_ID" -apex $SRC_GLOBS -logfile target/fortify/translate.log
           fi
 
       - name: Fortify Scan
         run: |
-          sourceanalyzer -b "$BUILD_ID" -scan \
-            -f target/fortify/scan.fpr \
-            -logfile target/fortify/scan.log
+          sourceanalyzer -b "$BUILD_ID" -scan -f target/fortify/scan.fpr -logfile target/fortify/scan.log
 
-      - name: Generate CSVs (critical/high/medium/low)
+      - name: Generate CSVs
         run: |
           for level in critical high medium low; do
-            FPRUtility -project target/fortify/scan.fpr \
-              -information -listIssues \
-              -search -query "[fortify priority order]:$level" \
-              -outputFormat CSV > "${level}.csv"
+            FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -query "[fortify priority order]:$level" -outputFormat CSV > "${level}.csv"
           done
 
       - name: Upload artifacts
