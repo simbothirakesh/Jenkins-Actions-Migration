@@ -40,9 +40,11 @@ jobs:
       CHROME_DRIVER: "/usr/bin/chromedriver"
       HTTPS_PROXY: "http://b2b-http.fpl.com:8080"
       HTTP_PROXY: "http://b2b-http.fpl.com:8080"
-      NO_PROXY: ".salesforce.com,.force.com,login.salesforce.com,test.salesforce.com,.visualforce.com,.salesforce-identity.com"
-      no_proxy: ".salesforce.com,.force.com,login.salesforce.com,test.salesforce.com,.visualforce.com,.salesforce-identity.com"
-      JAVA_TOOL_OPTIONS: "-Dhttps.proxyHost=b2b-http.fpl.com -Dhttps.proxyPort=8080 -Dhttp.proxyHost=b2b-http.fpl.com -Dhttp.proxyPort=8080"
+      https_proxy: "http://b2b-http.fpl.com:8080"
+      http_proxy: "http://b2b-http.fpl.com:8080"
+      NO_PROXY: "localhost,127.0.0.1,.fpl.com,.corp,.internal"
+      no_proxy: "localhost,127.0.0.1,.fpl.com,.corp,.internal"
+      JAVA_TOOL_OPTIONS: "-Dhttps.proxyHost=b2b-http.fpl.com -Dhttps.proxyPort=8080 -Dhttp.proxyHost=b2b-http.fpl.com -Dhttp.proxyPort=8080 -Dhttp.nonProxyHosts=localhost|127.0.0.1|*.fpl.com|*.corp|*.internal"
       MEINSERVICE_CREDENTIALS_RQA: ${{ secrets.MEINSERVICE_RQA_PROPERTIES_BASE64 }}
       MEINSERVICE_CREDENTIALS_TL: ${{ secrets.MEINSERVICE_TL_PROPERTIES_BASE64 }}
       MEINSERVICE_CREDENTIALS_LOGIN_AS: ${{ secrets.MEINSERVICE_LOGINAS_PROPERTIES }}
@@ -50,35 +52,35 @@ jobs:
       CONNECTION_FILE_FOR_AKBM_RQA: ${{ secrets.MEINSERVICE_AKBM_RQA_BASE64 }}
       CONNECTION_FILE_FOR_AKBM_TL_TROUBLE_SHOOTING: ${{ secrets.MEINSERVICE_AKBM_TL_TROUBLESHOOTING_BASE64 }}
       CONNECTION_FILE_FOR_KAUFLAND: ${{ secrets.MEINSERVICE_KAUFLAND_BASE64 }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
           cache: gradle
+
       - name: Create directories
         run: |
           mkdir -p ./src/test/resources
           mkdir -p ./src/main/resources/akbm
           mkdir -p ./src/main/resources/kaufland
           mkdir -p ./gradletmp
-          mkdir -p report
-          mkdir -p screenshots
-          mkdir -p logs
+          mkdir -p report screenshots logs
+
       - name: Setup test configuration files
         run: |
           ENV_CHOICE="${{ inputs.envChoice }}"
           echo "Running tests in environment: $ENV_CHOICE"
           if [ "$ENV_CHOICE" = "RQA" ]; then
-            export ACTUAL_ENVIRONMENT="RQA"
             echo "ACTUAL_ENVIRONMENT=RQA" >> $GITHUB_ENV
             echo "$MEINSERVICE_CREDENTIALS_RQA" | base64 -d > ./src/test/resources/test.properties
             echo "$CONNECTION_FILE_FOR_AKBM_RQA" | base64 -d > ./src/main/resources/akbm/akbm_rqa.ppk
           elif [ "$ENV_CHOICE" = "TL" ]; then
-            export ACTUAL_ENVIRONMENT="TL"
             echo "ACTUAL_ENVIRONMENT=TL" >> $GITHUB_ENV
             echo "$MEINSERVICE_CREDENTIALS_TL" | base64 -d > ./src/test/resources/test.properties
             echo "$CONNECTION_FILE_FOR_AKBM_TL" | base64 -d > ./src/main/resources/akbm/akbm_tl.ppk
@@ -86,27 +88,38 @@ jobs:
           fi
           echo "$CONNECTION_FILE_FOR_KAUFLAND" | base64 -d > ./src/main/resources/kaufland/MEINSERVICE_TL_OSCA.ppk
           echo "$MEINSERVICE_CREDENTIALS_LOGIN_AS" > ./src/test/resources/loginAs.properties
+
       - name: Make gradlew executable
         run: chmod +x ./gradlew
+
       - name: Clean gradle cache
         run: ./gradlew --gradle-user-home ./gradletmp clean
+
       - name: Connectivity diagnostics
         run: |
           set -e
+          java -XshowSettings:properties -version 2>&1 | grep -i -E "proxy(host|port)|nonProxyHosts" || true
           curl -sSIL https://test.salesforce.com
+
       - name: Run tests
         run: |
-          ./gradlew --gradle-user-home ./gradletmp --build-cache test -PmasterPassword=${{ secrets.MEINSERVICE_MASTER_PASSWORD }} --stacktrace --continue
-          TEST_EXIT_STATUS=$?
-          if [ $TEST_EXIT_STATUS -ne 0 ]; then
+          ./gradlew --gradle-user-home ./gradletmp --build-cache test \
+            -PmasterPassword=${{ secrets.MEINSERVICE_MASTER_PASSWORD }} \
+            -Dhttps.proxyHost=b2b-http.fpl.com -Dhttps.proxyPort=8080 \
+            -Dhttp.proxyHost=b2b-http.fpl.com  -Dhttp.proxyPort=8080 \
+            -Dhttp.nonProxyHosts="localhost|127.0.0.1|*.fpl.com|*.corp|*.internal" \
+            --stacktrace --continue
+          STATUS=$?
+          if [ $STATUS -ne 0 ]; then
             echo "One or more Gradle tests failed!"
             exit 1
           else
             echo "All tests passed successfully!"
           fi
+
       - name: Archive artifacts
-        uses: actions/upload-artifact@v3
         if: always()
+        uses: actions/upload-artifact@v3
         with:
           name: test-artifacts
           path: |
@@ -117,6 +130,7 @@ jobs:
             build/reports/tests/test/*
           retention-days: 15
           if-no-files-found: ignore
+
       - name: Send success notification
         if: success()
         uses: dawidd6/action-send-mail@v5
@@ -130,6 +144,7 @@ jobs:
             Build Number: ${{ github.run_number }}<br>
             Build URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           to: ${{ secrets.EMAIL_RECIPIENTS_QA }}
+
       - name: Send failure notification
         if: failure()
         uses: dawidd6/action-send-mail@v5
