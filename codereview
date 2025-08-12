@@ -1,4 +1,4 @@
-name: MeinService - Test Automation
+name: MeinService - Test Automation (Reusable)
 
 on:
   workflow_call:
@@ -37,12 +37,12 @@ jobs:
     container:
       image: docker.artifactory.fpl.com/markhobson/maven-chrome:jdk-11
     env:
+      CHROME_DRIVER: "/usr/bin/chromedriver"
       HTTPS_PROXY: "http://b2b-http.fpl.com:8080"
       HTTP_PROXY: "http://b2b-http.fpl.com:8080"
       NO_PROXY: ".salesforce.com,.force.com,login.salesforce.com,test.salesforce.com,.visualforce.com,.salesforce-identity.com"
       no_proxy: ".salesforce.com,.force.com,login.salesforce.com,test.salesforce.com,.visualforce.com,.salesforce-identity.com"
       JAVA_TOOL_OPTIONS: "-Dhttps.proxyHost=b2b-http.fpl.com -Dhttps.proxyPort=8080 -Dhttp.proxyHost=b2b-http.fpl.com -Dhttp.proxyPort=8080"
-      CHROME_DRIVER: "/usr/bin/chromedriver"
       MEINSERVICE_CREDENTIALS_RQA: ${{ secrets.MEINSERVICE_RQA_PROPERTIES_BASE64 }}
       MEINSERVICE_CREDENTIALS_TL: ${{ secrets.MEINSERVICE_TL_PROPERTIES_BASE64 }}
       MEINSERVICE_CREDENTIALS_LOGIN_AS: ${{ secrets.MEINSERVICE_LOGINAS_PROPERTIES }}
