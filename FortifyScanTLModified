@@ -30,14 +30,19 @@ jobs:
       BUILD_ID: salesforce-${{ github.run_id }}
 
     steps:
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Specify a compatible Node.js version. Node 20 is a good choice.
+
       - name: Install prerequisites
         shell: bash
         run: |
           set -e
-          if command -v apk >/dev/null 2>&1; then apk add --no-cache tar git nodejs npm; \
-          elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y tar git nodejs npm; \
-          elif command -v yum >/dev/null 2>&1; then yum install -y tar git nodejs npm; \
-          elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install tar git nodejs npm; \
+          if command -v apk >/dev/null 2>&1; then apk add --no-cache tar git; \
+          elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y tar git; \
+          elif command -v yum >/dev/null 2>&1; then yum install -y tar git; \
+          elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install tar git; \
           else echo "No supported package manager found"; exit 1; fi
           npm install --global @salesforce/cli
 
