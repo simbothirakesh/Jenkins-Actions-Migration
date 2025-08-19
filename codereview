@@ -1,136 +1,193 @@
-name: MeinService - Test Automation (Reusable)
+# Full project name: MEINSERVICE/MeinService - UI Test - Chatbot
+# Test System = Marie Salesforce - Einstein chatbot
+# Environment = TL
+# Run Type = Runs UI tests with 6 threads against a headless chrome browser
+# Technology = https://www.selenium.dev/
+# Test Type Overview = Tests written for Release 4.2, 5.0, 5.1, 5.2, 5.3, 6.0, 6.1, 6.2 + 6.3.
+# Result = #BuildNumber/testReport
+# Report = #BuildNumber/artifact/report/report*.html
+# Contact = Pulla Rao/Dhayanithi
+# Url = https://meinservice--tl--c.sandbox.vf.force.com/apex/EinsteinBotLandingPage?sfdc.tabName=01rbh000006k6bt&vfRetURLInSFX=%2Fhome%2Fhome.jsp<n_app_id=06m1v0000006ex3AAA&nonce=b9f19a1c0a4aa9ff168ee7ca48460a11fd33db9255d95ac63e405ecf1bdd4e66&sfdcIFrameOrigin=https%3A%2F%2Fmeinservice--tl.sandbox.lightning.force.com&tour=&isdtp=p1&sfdcIFrameHost=web&clc=1
+
+name: MeinService - UI Test - Chatbot TL
 
 on:
-  workflow_call:
+  # Allows manual triggering with environment selection
+  workflow_dispatch:
     inputs:
       envChoice:
-        description: 'Environment to run tests against'
+        description: 'Please select environment'
         required: true
-        type: string
-    secrets:
-      MEINSERVICE_RQA_PROPERTIES_BASE64:
-        required: true
-      MEINSERVICE_TL_PROPERTIES_BASE64:
-        required: true
-      MEINSERVICE_LOGINAS_PROPERTIES:
-        required: true
-      MEINSERVICE_AKBM_TL_BASE64:
-        required: true
-      MEINSERVICE_AKBM_RQA_BASE64:
-        required: true
-      MEINSERVICE_AKBM_TL_TROUBLESHOOTING_BASE64:
-        required: true
-      MEINSERVICE_KAUFLAND_BASE64:
-        required: true
-      MEINSERVICE_MASTER_PASSWORD:
-        required: true
-      EMAIL_SERVER_ADDRESS:
-        required: true
-      EMAIL_SERVER_PORT:
-        required: true
-      EMAIL_RECIPIENTS_QA:
-        required: true
+        default: 'TL'
+        type: choice
+        options:
+          - RQA
+          - TL
+      testChoice:
+        description: 'Please select test type'
+        required: false
+        default: 'ChatBotNightlyTests'
+        type: choice
+        options:
+          - ChatBotNightlyTests
+          - Release4dot2
+          - AnderesAnliegen
+          - AllShorterTests
+          - IntentTest
+          - Laufwegsanalyse
+          - --- Start of shorter individual tests ----
+          - Begruessung_Start__Verabschiedung_Ende
+          - Bug_ChatAbbruch
+          - Confused
+          - ErrorDialogTest
+          - Handover
+          - JenkinsTest
+          - KeineSendungsnummer
+          - LetzteMeileNacht
+          - LetzteMeileTag
+          - Prikus
+          - Reporting
+          - RPA
+          - Ruecksendungen
+          - TestCapa
+          - VerifyShipmentNumber
+          - WhatsApp
+
+  # Scheduled runs (Sunday to Thursday at 17:00 and 18:00 UTC)
+  schedule:
+    - cron: '0 17 * * 0-4'
+    - cron: '0 18 * * 0-4'
+
+  # Trigger on push to master branch
+  push:
+    branches:
+      - master
 
 jobs:
   test:
+    # Use fpl ITS Runner
     runs-on: arc-small-container
     container:
       image: docker.artifactory.fpl.com/markhobson/maven-chrome:jdk-11
+
     env:
+      # Set environment variables for ChromeDriver and proxies
       CHROME_DRIVER: "/usr/bin/chromedriver"
       HTTPS_PROXY: "http://b2b-http.fpl.com:8080"
       HTTP_PROXY: "http://b2b-http.fpl.com:8080"
-      https_proxy: "http://b2b-http.fpl.com:8080"
-      http_proxy: "http://b2b-http.fpl.com:8080"
-      NO_PROXY: "localhost,127.0.0.1,.fpl.com,.corp,.internal"
-      no_proxy: "localhost,127.0.0.1,.fpl.com,.corp,.internal"
-      JAVA_TOOL_OPTIONS: "-Dhttps.proxyHost=b2b-http.fpl.com -Dhttps.proxyPort=8080 -Dhttp.proxyHost=b2b-http.fpl.com -Dhttp.proxyPort=8080 -Dhttp.nonProxyHosts=localhost|127.0.0.1|*.fpl.com|*.corp|*.internal"
+      # Gradle settings
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx5G -XX:MaxMetaspaceSize=1024m"
+      # Credentials and connection files (from GitHub secrets)
       MEINSERVICE_CREDENTIALS_RQA: ${{ secrets.MEINSERVICE_RQA_PROPERTIES_BASE64 }}
       MEINSERVICE_CREDENTIALS_TL: ${{ secrets.MEINSERVICE_TL_PROPERTIES_BASE64 }}
       MEINSERVICE_CREDENTIALS_LOGIN_AS: ${{ secrets.MEINSERVICE_LOGINAS_PROPERTIES }}
-      CONNECTION_FILE_FOR_AKBM_TL: ${{ secrets.MEINSERVICE_AKBM_TL_BASE64 }}
-      CONNECTION_FILE_FOR_AKBM_RQA: ${{ secrets.MEINSERVICE_AKBM_RQA_BASE64 }}
-      CONNECTION_FILE_FOR_AKBM_TL_TROUBLE_SHOOTING: ${{ secrets.MEINSERVICE_AKBM_TL_TROUBLESHOOTING_BASE64 }}
-      CONNECTION_FILE_FOR_KAUFLAND: ${{ secrets.MEINSERVICE_KAUFLAND_BASE64 }}
+
 
     steps:
+      # Step 0: Validate environment and test choice
+      - name: Validate inputs
+        shell: bash
+        run: |
+          ENV_CHOICE="${{ github.event.inputs.envChoice }}"
+          TEST_CHOICE="${{ github.event.inputs.testChoice }}"
+
+          if [ "$ENV_CHOICE" != "RQA" ] && [ "$ENV_CHOICE" != "TL" ]; then
+            echo "Invalid environment choice: $ENV_CHOICE"
+            exit 1
+          fi
+          
+          valid_tests="ChatBotNightlyTests Release4dot2 AnderesAnliegen AllShorterTests IntentTest Laufwegsanalyse Begruessung_Start__Verabschiedung_Ende Bug_ChatAbbruch Confused ErrorDialogTest Handover JenkinsTest KeineSendungsnummer LetzteMeileNacht LetzteMeileTag Prikus Reporting RPA Ruecksendungen TestCapa VerifyShipmentNumber WhatsApp"
+          
+          if ! echo "$valid_tests" | grep -q -w "$TEST_CHOICE"; then
+            echo "Invalid test choice: $TEST_CHOICE"
+            exit 1
+          fi
+
+      # Step 1: Checkout repository code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Step 2: Set up Java 21 with Gradle cache
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
-          cache: gradle
+          cache: 'gradle'
 
+      # Step 3: Create required directories for resources, reports, etc.
       - name: Create directories
         run: |
           mkdir -p ./src/test/resources
-          mkdir -p ./src/main/resources/akbm
-          mkdir -p ./src/main/resources/kaufland
           mkdir -p ./gradletmp
-          mkdir -p report screenshots logs
+          mkdir -p report
+          mkdir -p screenshots
+          mkdir -p logs
 
+      # Step 4: Set up Proxy Config
+      - name: Proxy Config
+        run: curl -v https://test.salesforce.com
+        env:
+          HTTPS_PROXY: "http://b2b-http.fpl.com:8080"
+          HTTP_PROXY: "http://b2b-http.fpl.com:8080"
+
+      # Step 5: Decode and set up environment-specific configuration files
       - name: Setup test configuration files
         run: |
-          ENV_CHOICE="${{ inputs.envChoice }}"
+          ENV_CHOICE="${{ github.event.inputs.envChoice }}"
           echo "Running tests in environment: $ENV_CHOICE"
+
           if [ "$ENV_CHOICE" = "RQA" ]; then
+            export ACTUAL_ENVIRONMENT="RQA"
             echo "ACTUAL_ENVIRONMENT=RQA" >> $GITHUB_ENV
-            echo "$MEINSERVICE_CREDENTIALS_RQA" | base64 -d > ./src/test/resources/test.properties
-            echo "$CONNECTION_FILE_FOR_AKBM_RQA" | base64 -d > ./src/main/resources/akbm/akbm_rqa.ppk
-          elif [ "$ENV_CHOICE" = "TL" ]; then
+            echo "$MEINSERVICE_CREDENTIALS_RQA" | base64 -d> ./src/test/resources/test.properties
+          elif  [ "$ENV_CHOICE" = "TL" ]; then
+            export ACTUAL_ENVIRONMENT="TL"
             echo "ACTUAL_ENVIRONMENT=TL" >> $GITHUB_ENV
             echo "$MEINSERVICE_CREDENTIALS_TL" | base64 -d > ./src/test/resources/test.properties
-            echo "$CONNECTION_FILE_FOR_AKBM_TL" | base64 -d > ./src/main/resources/akbm/akbm_tl.ppk
-            echo "$CONNECTION_FILE_FOR_AKBM_TL_TROUBLE_SHOOTING" | base64 -d > ./src/main/resources/akbm/TL-MEINSERVICE-DWH.ppk
+          else
+            echo "Invalid environment choice: $ENV_CHOICE"
+            exit 1
           fi
-          echo "$CONNECTION_FILE_FOR_KAUFLAND" | base64 -d > ./src/main/resources/kaufland/MEINSERVICE_TL_OSCA.ppk
           echo "$MEINSERVICE_CREDENTIALS_LOGIN_AS" > ./src/test/resources/loginAs.properties
 
+      # Step 6: Make Gradle wrapper executable
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      # Step 7: Clean Gradle cache using a custom cache directory
       - name: Clean gradle cache
-        run: ./gradlew --gradle-user-home ./gradletmp clean
+        run: ./gradlew "-Dorg.gradle.jvmargs=-Xmx5G -XX:MaxMetaspaceSize=1024m" --gradle-user-home ./gradletmp clean
 
-      - name: Connectivity diagnostics
-        run: |
-          set -e
-          java -XshowSettings:properties -version 2>&1 | grep -i -E "proxy(host|port)|nonProxyHosts" || true
-          curl -sSIL https://test.salesforce.com
-
+      # Step 8: Run Gradle tests with master password and stacktrace
       - name: Run tests
         run: |
-          ./gradlew --gradle-user-home ./gradletmp --build-cache test \
-            -PmasterPassword=${{ secrets.MEINSERVICE_MASTER_PASSWORD }} \
-            -Dhttps.proxyHost=b2b-http.fpl.com -Dhttps.proxyPort=8080 \
-            -Dhttp.proxyHost=b2b-http.fpl.com  -Dhttp.proxyPort=8080 \
-            -Dhttp.nonProxyHosts="localhost|127.0.0.1|*.fpl.com|*.corp|*.internal" \
-            --stacktrace --continue
-          STATUS=$?
-          if [ $STATUS -ne 0 ]; then
-            echo "One or more Gradle tests failed!"
+          echo "Running Gradle tests"
+          ./gradlew "-Dorg.gradle.jvmargs=-Xmx5G -XX:MaxMetaspaceSize=1024m" --gradle-user-home ./gradletmp --build-cache test -P${{ github.event.inputs.testChoice }} -PmasterPassword=${{ secrets.MEINSERVICE_MASTER_PASSWORD }} --stacktrace --continue
+
+          TEST_EXIT_STATUS=$?
+          if [ $TEST_EXIT_STATUS -ne 0 ]; then
+            echo "One or more Gradle tests failed with exit status: $TEST_EXIT_STATUS"
             exit 1
           else
             echo "All tests passed successfully!"
           fi
 
+      # Step 9: Archive test artifacts (reports, screenshots, logs, test results)
       - name: Archive artifacts
-        if: always()
         uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: test-artifacts
           path: |
             report/*
             screenshots/*
             logs/*
-            build/test-results/**/*.xml
             build/reports/tests/test/*
           retention-days: 15
           if-no-files-found: ignore
 
+      # Step 9: Send email notification on success
       - name: Send success notification
         if: success()
         uses: dawidd6/action-send-mail@v5
@@ -140,11 +197,14 @@ jobs:
           from: 'noreply@fpl.com'
           subject: 'MEINSERVICE QS:"${{ env.ACTUAL_ENVIRONMENT }}" Successful: -> ${{ github.repository }}'
           html_body: |
-            Project: ${{ github.repository }}<br>
-            Build Number: ${{ github.run_number }}<br>
+            Project: ${{ github.repository }}
+
+            Build Number: ${{ github.run_number }}
+
             Build URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           to: ${{ secrets.EMAIL_RECIPIENTS_QA }}
 
+      # Step 10: Send email notification on failure
       - name: Send failure notification
         if: failure()
         uses: dawidd6/action-send-mail@v5
@@ -154,7 +214,10 @@ jobs:
           from: 'noreply@fpl.com'
           subject: 'MEINSERVICE QS:"${{ env.ACTUAL_ENVIRONMENT }}" Failed: -> ${{ github.repository }}'
           html_body: |
-            Project: ${{ github.repository }}<br>
-            Build Number: ${{ github.run_number }}<br>
+            Project: ${{ github.repository }}
+
+            Build Number: ${{ github.run_number }}
+
             Build URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           to: ${{ secrets.EMAIL_RECIPIENTS_QA }}
+ 
