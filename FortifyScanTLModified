@@ -33,7 +33,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Specify a compatible Node.js version. Node 20 is a good choice.
+          node-version: '20'
 
       - name: Install prerequisites
         shell: bash
@@ -59,24 +59,20 @@ jobs:
           test -d /opt/fortify/bin || { echo "::error::/opt/fortify/bin not found"; exit 1; }
           echo "/opt/fortify/bin" >> "$GITHUB_PATH"
 
-      - name: Select org credentials
+      - name: Select org alias
         shell: bash
         run: |
           if [[ "${{ github.event.inputs.environment }}" == "QA" ]]; then
-            echo "SF_USER=${{ secrets.RQA_USER }}"  >> "$GITHUB_ENV"
-            echo "SF_PASS=${{ secrets.RQA_PASS }}"  >> "$GITHUB_ENV"
-            echo "ORG=RQA"                      >> "$GITHUB_ENV"
+            echo "ORG=RQA" >> "$GITHUB_ENV"
           else
-            echo "SF_USER=${{ secrets.TL_USER }}"   >> "$GITHUB_ENV"
-            echo "SF_PASS=${{ secrets.TL_PASS }}"   >> "$GITHUB_ENV"
-            echo "ORG=TL"                       >> "$GITHUB_ENV"
+            echo "ORG=TL" >> "$GITHUB_ENV"
           fi
 
       - name: Authenticate to Salesforce
         shell: bash
         run: |
-          echo "$SF_PASS" | sf org login password --username "$SF_USER" --password-stdin --instance-url https://login.salesforce.com
-          sf org display --target-org "$SF_USER"
+          sf org login web --alias "$ORG" --instance-url https://test.salesforce.com
+          sf org display --target-org "$ORG"
 
       - name: Retrieve Metadata
         shell: bash
@@ -84,7 +80,7 @@ jobs:
           mkdir -p code
           sf project retrieve start \
             --metadata "ApexClass,ApexTrigger,ApexPage,AuraDefinitionBundle,LWCResource,StaticResource" \
-            --target-org "$SF_USER" \
+            --target-org "$ORG" \
             --output-dir "code"
 
       - name: Fortify Translate
