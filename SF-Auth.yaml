@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   fortify:
-    runs-on: arc-small-container
+    runs-on: arc-container-small
     container:
-      image: docker.artifactory.dhl.com/fortify/fortify-cloudscan-client:latest
+      image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
       options: --memory=4g
     env:
       HOME: /opt/fortify
@@ -108,6 +108,12 @@ jobs:
             --target-metadata-dir code \
             --json)
           
+          # Check if the result is valid JSON before piping to jq
+          if [[ -z "$RETRIEVAL_RESULT" ]]; then
+            echo "::error::Retrieval command returned no output. Check Salesforce CLI logs."
+            exit 1
+          fi
+
           RETRIEVED_TYPES=$(echo "$RETRIEVAL_RESULT" | jq -r '.result.retrievedSource.source[].type' | sort | uniq | tr '\n' ',' | sed 's/,$//')
           
           echo "Successfully retrieved the following components: ${RETRIEVED_TYPES}"
