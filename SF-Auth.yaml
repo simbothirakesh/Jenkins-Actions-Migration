@@ -69,8 +69,18 @@ stages:
     - script: sf org:open --target-org $(ORG_ALIAS) --json
       displayName: 'Verify Org Connection'
       
-    # Step 5: (Optional) A sample CI/CD action, such as retrieving all project source code
-    # We use the dynamically set alias for this step as well.
+    # Step 5: Retrieve all code-related components for a scan
+    # This command uses the --metadata flag for each type and suppresses verbose output.
     - script: |
-        sf project retrieve start --target-org $(ORG_ALIAS) --metadata-dir force-app/main/default
-      displayName: 'Retrieve Project Source'
+        sf project retrieve start \
+          --target-org $(ORG_ALIAS) \
+          --metadata ApexClass \
+          --metadata ApexTrigger \
+          --metadata ApexPage \
+          --metadata ApexComponent \
+          --metadata LightningComponentBundle \
+          --metadata AuraDefinitionBundle \
+          --metadata StaticResource \
+          --target-metadata-dir Salesforce-Metadata \
+          --json | jq -r '"Retrieval was successful: " + .result.id'
+      displayName: 'Retrieve Code Components for Scan'
