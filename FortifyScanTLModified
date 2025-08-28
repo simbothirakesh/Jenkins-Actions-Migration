@@ -59,7 +59,7 @@ jobs:
           test -d /opt/fortify/bin || { echo "::error::/opt/fortify/bin not found"; exit 1; }
           echo "/opt/fortify/bin" >> "$GITHUB_PATH"
 
-      - name: Select org alias
+      - name: Select org alias (RQA for QA input)
         shell: bash
         run: |
           if [[ "${{ github.event.inputs.environment }}" == "QA" ]]; then
@@ -68,11 +68,24 @@ jobs:
             echo "ORG=TL" >> "$GITHUB_ENV"
           fi
 
-      - name: Authenticate to Salesforce
+      - name: Pick auth URL & alias
         shell: bash
         run: |
-          sf org login web --alias "$ORG" --instance-url https://test.salesforce.com
-          sf org display --target-org "$ORG"
+          if [[ "$ORG" == "RQA" ]]; then
+            echo "SFDX_AUTH_URL=${{ secrets.SFDX_AUTH_URL_RQA }}" >> "$GITHUB_ENV"
+            echo "ORG_ALIAS=rqa-org" >> "$GITHUB_ENV"
+          else
+            echo "SFDX_AUTH_URL=${{ secrets.SFDX_AUTH_URL_TL }}" >> "$GITHUB_ENV"
+            echo "ORG_ALIAS=tl-org" >> "$GITHUB_ENV"
+          fi
+
+      - name: Authenticate to Salesforce (SFDX URL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$SFDX_AUTH_URL" > sfdx-auth-url.txt
+          sf org login sfdx-url --sfdx-url-file sfdx-auth-url.txt --alias "$ORG_ALIAS" --set-default
+          sf org display --target-org "$ORG_ALIAS"
 
       - name: Retrieve Metadata
         shell: bash
@@ -80,7 +93,7 @@ jobs:
           mkdir -p code
           sf project retrieve start \
             --metadata "ApexClass,ApexTrigger,ApexPage,AuraDefinitionBundle,LWCResource,StaticResource" \
-            --target-org "$ORG" \
+            --target-org "$ORG_ALIAS" \
             --output-dir "code"
 
       - name: Fortify Translate
