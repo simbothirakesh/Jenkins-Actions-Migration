@@ -1,0 +1,76 @@
+# azure-pipelines.yml
+
+# This pipeline will be triggered manually
+trigger: none
+
+# Define a pipeline parameter to allow manual selection of the org
+parameters:
+- name: targetOrg
+  displayName: 'Select the Salesforce Org'
+  type: string
+  default: 'RQA'
+  values:
+  - RQA
+  - TL
+
+# Use a standard Ubuntu agent
+pool:
+  vmImage: 'ubuntu-latest'
+
+# Define a single stage for our Continuous Integration process
+stages:
+- stage: CI
+  displayName: 'Salesforce CI'
+  jobs:
+  - job: Build
+    displayName: 'CI Build Job'
+    steps:
+    
+    # Step 1: Install Node.js, which is required for the SF CLI
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '18.x' # Use a recent LTS version
+      displayName: 'Install Node.js'
+      
+    # Step 2: Install the Salesforce CLI (sf)
+    - script: npm install -g @salesforce/cli@latest
+      displayName: 'Install Salesforce CLI'
+      
+    # Step 3: Securely authenticate to the selected Salesforce org
+    # The script uses a conditional check on the selected parameter to use the correct secret.
+    - script: |
+        echo "Authenticating to ${{ parameters.targetOrg }} org..."
+        
+        # Set the alias based on the selected org
+        if [ "${{ parameters.targetOrg }}" == "RQA" ]; then
+          AUTH_URL=$(SFDX_AUTH_URL_RQA)
+          ORG_ALIAS="rqa-org"
+        else
+          AUTH_URL=$(SFDX_AUTH_URL_TL)
+          ORG_ALIAS="tl-org"
+        fi
+        
+        # Create a temporary file with the auth URL
+        echo "$AUTH_URL" > sfdx-auth-url.txt
+        
+        # Log in to the Salesforce org
+        sf org:login:sfdx-url --sfdx-url-file sfdx-auth-url.txt --set-default-dev-hub --set-default --alias $ORG_ALIAS
+        
+        # Make the alias available to subsequent steps
+        echo "##vso[task.setvariable variable=ORG_ALIAS]$ORG_ALIAS"
+        
+      displayName: 'Authenticate to Selected Org'
+      env:
+        SFDX_AUTH_URL_RQA: $(SFDX_AUTH_URL_RQA)
+        SFDX_AUTH_URL_TL: $(SFDX_AUTH_URL_TL)
+        
+    # Step 4: Verify the connection without displaying the access token
+    # We now use the variable set in the previous step
+    - script: sf org:open --target-org $(ORG_ALIAS) --json
+      displayName: 'Verify Org Connection'
+      
+    # Step 5: (Optional) A sample CI/CD action, such as retrieving all project source code
+    # We use the dynamically set alias for this step as well.
+    - script: |
+        sf project retrieve start --target-org $(ORG_ALIAS) --metadata-dir force-app/main/default
+      displayName: 'Retrieve Project Source'
