@@ -45,6 +45,7 @@ jobs:
           elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install tar git jq; \
           else echo "No supported package manager found"; exit 1; fi
           npm install --global @salesforce/cli
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -57,6 +58,7 @@ jobs:
           set -e
           test -d /opt/fortify/bin || { echo "::error::/opt/fortify/bin not found"; exit 1; }
           echo "/opt/fortify/bin" >> "$GITHUB_PATH"
+
       - name: Select org alias
         shell: bash
         run: |
@@ -65,6 +67,7 @@ jobs:
           else
             echo "ORG=TL" >> "$GITHUB_ENV"
           fi
+
       - name: Pick auth URL & alias
         shell: bash
         run: |
@@ -75,22 +78,31 @@ jobs:
             echo "SFDX_AUTH_URL=${{ secrets.SFDX_AUTH_URL_TL }}" >> "$GITHUB_ENV"
             echo "ORG_ALIAS=tl-org" >> "$GITHUB_ENV"
           fi
+
       - name: Authenticate to Salesforce (SFDX URL)
         shell: bash
         run: |
           set -euo pipefail
-          # write secret to file without printing; mask path in logs
           umask 177
           printf '%s' "$SFDX_AUTH_URL" > sfdx-auth-url.txt
           sf org login sfdx-url --sfdx-url-file sfdx-auth-url.txt --alias "$ORG_ALIAS" --set-default
-          # Removed the verbose 'whoami' and 'display' commands to save time
-          # sf org whoami --target-org "$ORG_ALIAS" --verbose
-          # sf org display --target-org "$ORG_ALIAS" --verbose
-      - name: Retrieve Code Components and Display Summary
+
+      - name: Create project file and retrieve components
         id: retrieve
         shell: bash
         run: |
-          mkdir -p code
+          set -e
+          echo '{
+            "packageDirectories": [
+              {
+                "path": "code",
+                "default": true
+              }
+            ],
+            "namespace": "",
+            "sfdcApiVersion": "60.0",
+            "sourceApiVersion": "60.0"
+          }' > sfdx-project.json
           RETRIEVAL_OUTPUT=$(sf project retrieve start \
             --target-org "$ORG_ALIAS" \
             --metadata ApexClass \
@@ -100,32 +112,29 @@ jobs:
             --metadata LightningComponentBundle \
             --metadata AuraDefinitionBundle \
             --metadata StaticResource \
-            --target-metadata-dir code \
             --json 2>&1)
-          
-          # Check for specific Salesforce CLI errors in the output before trying to parse JSON
           if echo "$RETRIEVAL_OUTPUT" | grep -q 'Error'; then
             echo "::error::Salesforce CLI retrieval failed. Output:"
             echo "$RETRIEVAL_OUTPUT"
             exit 1
           fi
-          # Use a defensive jq filter that can handle null or malformed input
           RETRIEVED_TYPES=$(echo "$RETRIEVAL_OUTPUT" | jq -r '(.result.retrievedSource.source[]?.type // empty)' | sort | uniq | tr '\n' ',' | sed 's/,$//')
-          
           echo "Successfully retrieved the following components: ${RETRIEVED_TYPES}"
+
       - name: Fortify Translate
         shell: bash
         run: |
           set -e
           mkdir -p target/fortify
           sourceanalyzer -b "$BUILD_ID" -clean || true
-          # Analyze Apex sources under code/
           sourceanalyzer -b "$BUILD_ID" -logfile target/fortify/translate.log -apex "code/**/*"
+
       - name: Fortify Scan
         shell: bash
         run: |
           set -e
           sourceanalyzer -b "$BUILD_ID" -scan -f target/fortify/scan.fpr -logfile target/fortify/scan.log
+
       - name: Generate CSVs
         shell: bash
         run: |
@@ -133,6 +142,7 @@ jobs:
           for level in critical high medium low; do
             FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -query "[fortify priority order]:$level" -outputFormat CSV > "${level}.csv"
           done
+
       - name: Generate PDF report
         shell: bash
         run: |
@@ -142,8 +152,9 @@ jobs:
           else
             echo "BIRTReportGenerator not available; skipping PDF"
           fi
+
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: fortify-results-${{ env.ORG }}
           path: |
@@ -162,4 +173,3 @@ jobs:
         shell: bash
         run: |
           shred -u sfdx-auth-url.txt 2>/dev/null || rm -f sfdx-auth-url.txt
-Fortify Scan - Salesforce · MeinService/meinservice_sfdc-metadata_mirror@474663f
