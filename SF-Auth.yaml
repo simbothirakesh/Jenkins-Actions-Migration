@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   fortify:
-    runs-on: arc-small-container
+    runs-on: arc-container-small
     container:
       image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
       options: --memory=4g
@@ -83,40 +83,48 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "$SFDX_AUTH_URL" > sfdx-auth-url.txt
+          # write secret to file without printing; mask path in logs
+          umask 177
+          printf '%s' "$SFDX_AUTH_URL" > sfdx-auth-url.txt
           sf org login sfdx-url --sfdx-url-file sfdx-auth-url.txt --alias "$ORG_ALIAS" --set-default
-          sf org display --target-org "$ORG_ALIAS"
+          sf org whoami --target-org "$ORG_ALIAS" --verbose
+          sf org display --target-org "$ORG_ALIAS" --verbose
 
       - name: Retrieve Metadata
         shell: bash
         run: |
+          set -e
           mkdir -p code
           sf project retrieve start \
             --metadata ApexClass \
-			--metadata ApexTrigger \
-			--metadata ApexPage \
-			--metadata AuraDefinitionBundle \
-			--metadata LightningComponentBundle \
-			--metadata ApexComponent \
-			--metadata StaticResource \
+            --metadata ApexTrigger \
+            --metadata ApexPage \
+            --metadata AuraDefinitionBundle \
+            --metadata LightningComponentBundle \
+            --metadata ApexComponent \
+            --metadata StaticResource \
             --target-org "$ORG_ALIAS" \
-            --target-metadata-dir "code"
+            --output-dir "code"
 
       - name: Fortify Translate
         shell: bash
         run: |
+          set -e
           mkdir -p target/fortify
           sourceanalyzer -b "$BUILD_ID" -clean || true
-          sourceanalyzer -b "$BUILD_ID" -apex "code/**/*" -logfile target/fortify/translate.log
+          # Analyze Apex sources under code/
+          sourceanalyzer -b "$BUILD_ID" -logfile target/fortify/translate.log -apex "code/**/*"
 
       - name: Fortify Scan
         shell: bash
         run: |
+          set -e
           sourceanalyzer -b "$BUILD_ID" -scan -f target/fortify/scan.fpr -logfile target/fortify/scan.log
 
       - name: Generate CSVs
         shell: bash
         run: |
+          set -e
           for level in critical high medium low; do
             FPRUtility -project target/fortify/scan.fpr -information -listIssues -search -query "[fortify priority order]:$level" -outputFormat CSV > "${level}.csv"
           done
@@ -124,6 +132,7 @@ jobs:
       - name: Generate PDF report
         shell: bash
         run: |
+          set -e
           if command -v BIRTReportGenerator >/dev/null 2>&1; then
             BIRTReportGenerator -template 'OWASP Top 10' --SecurityIssueDetails --IncludeDescOfKeyTerminology --UseFortifyPriorityOrder -source target/fortify/scan.fpr -format pdf --Version 'OWASP Top 10 2017' -output FortifyReport.pdf
           else
@@ -131,7 +140,7 @@ jobs:
           fi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: fortify-results-${{ env.ORG }}
           path: |
@@ -144,3 +153,9 @@ jobs:
             target/fortify/scan.log
             target/fortify/scan.fpr
           retention-days: 30
+
+      - name: Cleanup auth file
+        if: always()
+        shell: bash
+        run: |
+          shred -u sfdx-auth-url.txt 2>/dev/null || rm -f sfdx-auth-url.txt
