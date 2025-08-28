@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   fortify:
-    runs-on: arc-container-small
+    runs-on: arc-small-container
     container:
-      image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
+      image: docker.artifactory.dhl.com/fortify/fortify-cloudscan-client:latest
       options: --memory=4g
     env:
       HOME: /opt/fortify
