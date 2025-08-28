@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   fortify:
-    runs-on: arc-small-container
+    runs-on: arc-container-small
     container:
-      image: docker.artifactory.dhl.com/fortify/fortify-cloudscan-client:latest
+      image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
       options: --memory=4g
     env:
       HOME: /opt/fortify
@@ -96,7 +96,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p code
-          RETRIEVAL_RESULT=$(sf project retrieve start \
+          RETRIEVAL_OUTPUT=$(sf project retrieve start \
             --target-org "$ORG_ALIAS" \
             --metadata ApexClass \
             --metadata ApexTrigger \
@@ -106,15 +106,17 @@ jobs:
             --metadata AuraDefinitionBundle \
             --metadata StaticResource \
             --target-metadata-dir code \
-            --json)
+            --json 2>&1)
           
-          # Check if the result is valid JSON before piping to jq
-          if [[ -z "$RETRIEVAL_RESULT" ]]; then
-            echo "::error::Retrieval command returned no output. Check Salesforce CLI logs."
+          # Check for specific Salesforce CLI errors in the output before trying to parse JSON
+          if echo "$RETRIEVAL_OUTPUT" | grep -q 'Error'; then
+            echo "::error::Salesforce CLI retrieval failed. Output:"
+            echo "$RETRIEVAL_OUTPUT"
             exit 1
           fi
 
-          RETRIEVED_TYPES=$(echo "$RETRIEVAL_RESULT" | jq -r '.result.retrievedSource.source[].type' | sort | uniq | tr '\n' ',' | sed 's/,$//')
+          # Use a defensive jq filter that can handle null or malformed input
+          RETRIEVED_TYPES=$(echo "$RETRIEVAL_OUTPUT" | jq -r '(.result.retrievedSource.source[]?.type // empty)' | sort | uniq | tr '\n' ',' | sed 's/,$//')
           
           echo "Successfully retrieved the following components: ${RETRIEVED_TYPES}"
 
@@ -152,7 +154,7 @@ jobs:
           fi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: fortify-results-${{ env.ORG }}
           path: |
