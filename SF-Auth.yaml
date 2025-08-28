@@ -87,15 +87,16 @@ jobs:
           umask 177
           printf '%s' "$SFDX_AUTH_URL" > sfdx-auth-url.txt
           sf org login sfdx-url --sfdx-url-file sfdx-auth-url.txt --alias "$ORG_ALIAS" --set-default
-          sf org whoami --target-org "$ORG_ALIAS" --verbose
-          sf org display --target-org "$ORG_ALIAS" --verbose
+          # Removed the verbose 'whoami' and 'display' commands to save time
+          # sf org whoami --target-org "$ORG_ALIAS" --verbose
+          # sf org display --target-org "$ORG_ALIAS" --verbose
 
-      - name: Retrieve Code Components
+      - name: Retrieve Code Components and Display Summary
         id: retrieve
         shell: bash
         run: |
           mkdir -p code
-          RETRIEVE_JOB_ID=$(sf project retrieve start \
+          RETRIEVAL_RESULT=$(sf project retrieve start \
             --target-org "$ORG_ALIAS" \
             --metadata ApexClass \
             --metadata ApexTrigger \
@@ -105,14 +106,10 @@ jobs:
             --metadata AuraDefinitionBundle \
             --metadata StaticResource \
             --target-metadata-dir code \
-            --json | jq -r '.result.id')
-
-          echo "RETRIEVE_JOB_ID=$RETRIEVE_JOB_ID" >> "$GITHUB_ENV"
-
-      - name: Display Retrieved Components
-        shell: bash
-        run: |
-          RETRIEVED_TYPES=$(sf project retrieve resume --job-id "$RETRIEVE_JOB_ID" --json | jq -r '.result.retrievedSource.source[].type' | sort | uniq | tr '\n' ',' | sed 's/,$//')
+            --json)
+          
+          RETRIEVED_TYPES=$(echo "$RETRIEVAL_RESULT" | jq -r '.result.retrievedSource.source[].type' | sort | uniq | tr '\n' ',' | sed 's/,$//')
+          
           echo "Successfully retrieved the following components: ${RETRIEVED_TYPES}"
 
       - name: Fortify Translate
