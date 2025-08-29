@@ -88,14 +88,24 @@ jobs:
             "sourceApiVersion": "58.0"
           }' > sfdx-project.json
           
-          sf project retrieve start \
+          RETRIEVAL_OUTPUT=$(sf project retrieve start \
             --target-org "$ORG_ALIAS" \
             --metadata ApexClass,ApexTrigger,ApexPage,ApexComponent,LightningComponentBundle,AuraDefinitionBundle,StaticResource \
-            --json
-            
+            --json)
+          
+          if echo "$RETRIEVAL_OUTPUT" | grep -q 'Error'; then
+            echo "::error::Salesforce CLI retrieval failed. Output:"
+            echo "$RETRIEVAL_OUTPUT"
+            exit 1
+          fi
+          
+          RETRIEVED_TYPES=$(echo "$RETRIEVAL_OUTPUT" | jq -r '(.result.retrievedSource.source[]?.type // empty)' | sort | uniq | tr '\n' ',' | sed 's/,$//')
+          
+          echo "Successfully retrieved the following components: ${RETRIEVED_TYPES}"
+          
           rm sfdx-auth-url.txt
           rm sfdx-project.json
-
+          
       - name: Fortify Scan
         shell: bash
         run: |
