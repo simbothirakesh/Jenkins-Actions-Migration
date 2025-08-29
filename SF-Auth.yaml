@@ -90,35 +90,24 @@ jobs:
           printf '%s' "$SFDX_AUTH_URL" > sfdx-auth-url.txt
           sf org login sfdx-url --sfdx-url-file sfdx-auth-url.txt --alias "$ORG_ALIAS" --set-default
       
-      - name: Retrieve Code Components and Display Summary
+      - name: Prepare code directory
+        shell: bash
+        run: |
+          cd ${{ env.WORKSPACE }}
+          mkdir -p code
+
+      - name: Retrieve Code Components
         id: retrieve
         shell: bash
         run: |
           set -euo pipefail
           cd ${{ env.WORKSPACE }}
-          mkdir -p code
-          RETRIEVAL_OUTPUT=$(sf project retrieve start \
+          sf project retrieve start \
             --target-org "$ORG_ALIAS" \
-            --metadata ApexClass \
-            --metadata ApexTrigger \
-            --metadata ApexPage \
-            --metadata ApexComponent \
-            --metadata LightningComponentBundle \
-            --metadata AuraDefinitionBundle \
-            --metadata StaticResource \
-            --target-metadata-dir code \
-            --json 2>&1)
-          
-          if echo "$RETRIEVAL_OUTPUT" | grep -q 'Error'; then
-            echo "::error::Salesforce CLI retrieval failed. Output:"
-            echo "$RETRIEVAL_OUTPUT"
-            exit 1
-          fi
+            --metadata ApexClass,ApexTrigger,ApexPage,ApexComponent,LightningComponentBundle,AuraDefinitionBundle,StaticResource \
+            --target-metadata-dir code
 
-          RETRIEVED_TYPES=$(echo "$RETRIEVAL_OUTPUT" | jq -r '(.result.retrievedSource.source[]?.type // empty)' | sort | uniq | tr '\n' ',' | sed 's/,$//')
-          echo "Successfully retrieved the following components: ${RETRIEVED_TYPES}"
-
-      - name: Fortify Translate
+      - name: Fortify Translate and Scan
         shell: bash
         run: |
           set -e
@@ -126,12 +115,6 @@ jobs:
           mkdir -p target/fortify
           sourceanalyzer -b "$BUILD_ID" -clean || true
           sourceanalyzer -b "$BUILD_ID" -logfile target/fortify/translate.log -apex "code/**/*"
-
-      - name: Fortify Scan
-        shell: bash
-        run: |
-          set -e
-          cd ${{ env.WORKSPACE }}
           sourceanalyzer -b "$BUILD_ID" -scan -f target/fortify/scan.fpr -logfile target/fortify/scan.log
 
       - name: Generate CSVs
