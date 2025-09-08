@@ -1,0 +1,69 @@
+pipeline {
+    agent any
+	stages {
+        stage('FORTIFY SCAN') {
+            steps {
+                script {
+                    node('fortify_agent') {
+                        fileOperations([
+                                // Clean the whole jenkins job workspace on fortify-agent
+                                folderDeleteOperation('.')
+                        ])
+
+                        // checkout relevant meinservice sources on fortify agent
+                        checkout([$class                           : 'GitSCM',
+                                  branches                         : [[name: '*/master']],
+                                  doGenerateSubmoduleConfigurations: false,
+                                  extensions                       : [],
+                                  submoduleCfg                     : [],
+                                  userRemoteConfigs                : [[credentialsId: 'MS-Jenkins-App',
+                                                                       url          : 'https://git.fpl.com/MeinService/DependencyCheckTL.git']]
+                        ])
+
+						sh "java -version"
+						sh "chmod 755 ./tools/apache-ant/apache-ant-1.10.12/bin/ant"
+						sh "./tools/apache-ant/apache-ant-1.10.12/bin/ant -version"
+						sh "chmod 755 ./tools/dependency-check/bin/*"
+						
+						withCredentials([string(credentialsId: 'meinservice-tl-token', variable: 'token'),
+						                 usernamePassword(credentialsId: 'meinservice-tl-user', usernameVariable: 'user', passwordVariable: 'password')]) {
+							sh "./tools/apache-ant/apache-ant-1.10.12/bin/ant -Dsf.username=$user -Dsf.password=$password -buildfile ./config/build.xml -propertyfile ./config/build.properties retrieveCodeAndPackages"
+							sh "ls -latr ./code"
+							sh "ls -latr ./code/classes/"
+							
+						}
+						
+						// Remove all test files from fortify scan
+                        fileOperations([
+                                fileDeleteOperation(includes: 'code/classes/**Test.cls*'),
+                                fileDeleteOperation(includes: 'code/classes/**/TEST_**.cls*'),
+                                fileDeleteOperation(includes: 'code/classes/**/Test_**.cls*'),
+                                fileDeleteOperation(includes: 'code/classes/**/**.xml*')
+                        ])
+						
+						
+						
+						//unzip all static resources
+						sh "unzip -qq code/staticresources/*.resource 2> /dev/null || true"
+						sh "./tools/dependency-check/bin/dependency-check.sh --project \"MeinServiceTL\" --scan \"code/\" --proxyserver=b2b-http.fpl.com --proxyport=8080 --nonProxyHosts=*.fpl.com --cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz"
+                    
+						publishHTML target: [
+                                allowMissing         : false,
+                                alwaysLinkToLastBuild: false,
+                                keepAll              : true,
+                                reportDir            : '',
+                                reportFiles          : 'dependency-check-report.html',
+                                reportName           : 'Depdendency Check Report'
+                        ]
+					}
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            archiveArtifacts artifacts: '**/*', fingerprint: false
+        }
+    }
+}
