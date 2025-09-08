@@ -1,16 +1,16 @@
 name: Fortify Scan - MeinService TL
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # manual trigger only
 
 permissions:
   contents: read
 
 jobs:
   fortify:
-    runs-on: arc-small-container
+    runs-on: ubuntu-latest
     container:
-      image: docker.artifactory.dhl.com/fortify/fortify-cloudscan-client:latest
+      image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
       options: --memory=4g
     env:
       HOME: /opt/fortify
@@ -39,10 +39,7 @@ jobs:
       - name: Retrieve Metadata
         run: |
           mkdir -p code
-          sf project retrieve start \
-            --metadata ApexClass,ApexTrigger,ApexPage,ApexComponent,LightningComponentBundle,AuraDefinitionBundle,StaticResource \
-            --target-org tl-org \
-            --output-dir code
+          sf project retrieve start --metadata ApexClass,ApexTrigger,ApexPage,ApexComponent,LightningComponentBundle,AuraDefinitionBundle,StaticResource --target-org tl-org --output-dir code
 
       - name: Remove Test Classes from Fortify Scan
         run: |
@@ -51,13 +48,11 @@ jobs:
           rm -f code/classes/**/Test_*.cls*
           rm -f code/classes/*.xml || true
 
-      - name: Extract static resources
+      - name: Extract static resources (using jar)
         run: |
-          mkdir -p code/staticresources_extracted
-          for f in code/staticresources/*.resource; do
-            if [ -f "$f" ]; then
-              jar -xf "$f" -C "code/staticresources_extracted/$(basename "$f" .resource)" || true
-            fi
+          for file in code/staticresources/*.resource; do
+            [ -f "$file" ] || continue
+            jar xf "$file"
           done
 
       - name: Run Dependency Check
@@ -66,19 +61,29 @@ jobs:
           ./tools/dependency-check/bin/dependency-check.sh \
             --project "MeinServiceTL" \
             --scan "code/" \
-            --format HTML,CSV \
-            --out . \
-            --proxyserver=b2b-http.dhl.com \
+            --exclude "**/aura/**" \
+            --exclude "**/lwc/**" \
+            --scan "code/staticresources/" \
+            --proxyserver=b2b-http.fpl.com \
             --proxyport=8080 \
-            --nonProxyHosts=*.dhl.com \
-            --cveUrlModified=https://artifactory.dhl.com/nvd/nvdcve-1.1-modified.json.gz \
-            --cveUrlBase=https://artifactory.dhl.com/nvd/nvdcve-1.1-%d.json.gz
+            --nonProxyHosts=*.fpl.com \
+            --cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz \
+            --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz
 
-      - name: Archive Reports
-        uses: actions/upload-artifact@v3
+      - name: Upload Dependency Check HTML Report
+        uses: actions/upload-artifact@v4
         with:
-          name: dependency-check-reports
-          path: |
-            dependency-check-report.html
-            dependency-check-report.csv
-			
+          name: dependency-check-report-html
+          path: dependency-check-report.html
+
+      - name: Upload Dependency Check CSV Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report-csv
+          path: dependency-check-report.csv
+
+      - name: Upload Dependency Check JSON Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report-json
+          path: dependency-check-report.json
