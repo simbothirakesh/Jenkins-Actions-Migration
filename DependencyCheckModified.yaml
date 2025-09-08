@@ -1,7 +1,7 @@
 name: Fortify Scan - MeinService TL
 
 on:
-  workflow_dispatch: # manual trigger
+  workflow_dispatch:
   push:
     branches:
       - master
@@ -39,10 +39,16 @@ jobs:
           sf org login sfdx-url --sfdx-url-file sfdx_auth.txt --alias tl-org --set-default
           sf org display --target-org tl-org
 
-      - name: Retrieve Source from Salesforce
+      - name: Retrieve Metadata
         run: |
-          mkdir code
-          sf project retrieve start --target-org tl-org --manifest ./manifest/package.xml --output-dir code
+          mkdir -p code
+          sf project retrieve start --metadata ApexClass --target-org tl-org --output-dir code
+          sf project retrieve start --metadata ApexTrigger --target-org tl-org --output-dir code
+          sf project retrieve start --metadata ApexPage --target-org tl-org --output-dir code
+          sf project retrieve start --metadata ApexComponent --target-org tl-org --output-dir code
+          sf project retrieve start --metadata LightningComponentBundle --target-org tl-org --output-dir code
+          sf project retrieve start --metadata AuraDefinitionBundle --target-org tl-org --output-dir code
+          sf project retrieve start --metadata StaticResource --target-org tl-org --output-dir code
 
       - name: Remove Test Classes from Fortify Scan
         run: |
