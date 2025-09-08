@@ -1,0 +1,73 @@
+name: Fortify Scan - MeinService TL
+
+on:
+  workflow_dispatch: # manual trigger
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  fortify:
+    runs-on: ubuntu-latest
+    container:
+      image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
+      options: --memory=4g
+    env:
+      HOME: /opt/fortify
+      SCA_VM_OPTS: -Xmx2750M
+      JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
+      BUILD_ID: salesforce-${{ github.run_id }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Authenticate to Salesforce
+        run: |
+          echo "${{ secrets.SFDX_AUTH_URL_TL }}" > sfdx_auth.txt
+          sf org login sfdx-url --sfdx-url-file sfdx_auth.txt --alias tl-org --set-default
+          sf org display --target-org tl-org
+
+      - name: Retrieve Source from Salesforce
+        run: |
+          mkdir code
+          sf project retrieve start --target-org tl-org --manifest ./manifest/package.xml --output-dir code
+
+      - name: Remove Test Classes from Fortify Scan
+        run: |
+          rm -f code/classes/*Test.cls*
+          rm -f code/classes/**/TEST_*.cls*
+          rm -f code/classes/**/Test_*.cls*
+          rm -f code/classes/*.xml || true
+
+      - name: Unzip static resources
+        run: unzip -qq code/staticresources/*.resource -d code/staticresources/ || true
+
+      - name: Run Dependency Check
+        run: |
+          chmod 755 ./tools/dependency-check/bin/*
+          ./tools/dependency-check/bin/dependency-check.sh \
+            --project "MeinServiceTL" \
+            --scan "code/" \
+            --proxyserver=b2b-http.fpl.com \
+            --proxyport=8080 \
+            --nonProxyHosts=*.fpl.com \
+            --cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz \
+            --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz
+
+      - name: Archive Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: dependency-check-report.html
