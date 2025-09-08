@@ -1,0 +1,27 @@
+name: Salesforce Metadata to Source Conversion
+
+on:
+  workflow_dispatch:
+
+jobs:
+  convert_metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Salesforce CLI
+        run: |
+          npm install --global @salesforce/cli
+
+      - name: Convert Metadata to Source Format
+        run: |
+          sf project convert mdapi --root-dir "your_metadata_folder" --output-dir "force-app"
+      
+      - name: Commit Converted Files
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add force-app
+          git commit -m "feat: Convert metadata to source format"
+          git push
