@@ -1,10 +1,7 @@
 name: Fortify Scan - MeinService TL
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - master
+  workflow_dispatch:   # only manual trigger
 
 permissions:
   contents: read
@@ -42,13 +39,10 @@ jobs:
       - name: Retrieve Metadata
         run: |
           mkdir -p code
-          sf project retrieve start --metadata ApexClass --target-org tl-org --output-dir code
-          sf project retrieve start --metadata ApexTrigger --target-org tl-org --output-dir code
-          sf project retrieve start --metadata ApexPage --target-org tl-org --output-dir code
-          sf project retrieve start --metadata ApexComponent --target-org tl-org --output-dir code
-          sf project retrieve start --metadata LightningComponentBundle --target-org tl-org --output-dir code
-          sf project retrieve start --metadata AuraDefinitionBundle --target-org tl-org --output-dir code
-          sf project retrieve start --metadata StaticResource --target-org tl-org --output-dir code
+          sf project retrieve start \
+            --metadata ApexClass,ApexTrigger,ApexPage,ApexComponent,LightningComponentBundle,AuraDefinitionBundle,StaticResource \
+            --target-org tl-org \
+            --output-dir code
 
       - name: Remove Test Classes from Fortify Scan
         run: |
@@ -57,8 +51,14 @@ jobs:
           rm -f code/classes/**/Test_*.cls*
           rm -f code/classes/*.xml || true
 
-      - name: Unzip static resources
-        run: unzip -qq code/staticresources/*.resource -d code/staticresources/ || true
+      - name: Extract static resources
+        run: |
+          mkdir -p code/staticresources_extracted
+          for f in code/staticresources/*.resource; do
+            if [ -f "$f" ]; then
+              jar -xf "$f" -C "code/staticresources_extracted/$(basename "$f" .resource)" || true
+            fi
+          done
 
       - name: Run Dependency Check
         run: |
@@ -66,6 +66,8 @@ jobs:
           ./tools/dependency-check/bin/dependency-check.sh \
             --project "MeinServiceTL" \
             --scan "code/" \
+            --format HTML,CSV \
+            --out . \
             --proxyserver=b2b-http.fpl.com \
             --proxyport=8080 \
             --nonProxyHosts=*.fpl.com \
@@ -73,7 +75,9 @@ jobs:
             --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz
 
       - name: Archive Reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
-          name: dependency-check-report
-          path: dependency-check-report.html
+          name: dependency-check-reports
+          path: |
+            dependency-check-report.html
+            dependency-check-report.csv
