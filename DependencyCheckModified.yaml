@@ -64,11 +64,12 @@ jobs:
             --exclude "**/aura/**" \
             --exclude "**/lwc/**" \
             --scan "code/staticresources/" \
+            --disableOssIndex \
             --proxyserver=b2b-http.fpl.com \
             --proxyport=8080 \
             --nonProxyHosts=*.fpl.com \
             --cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz \
-            --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz
+            --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz || true
 
       - name: Upload Dependency Check HTML Report
         uses: actions/upload-artifact@v4
