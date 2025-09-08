@@ -1,16 +1,16 @@
 name: Fortify Scan - MeinService TL
 
 on:
-  workflow_dispatch:   # only manual trigger
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   fortify:
-    runs-on: ubuntu-latest
+    runs-on: arc-small-container
     container:
-      image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
+      image: docker.artifactory.dhl.com/fortify/fortify-cloudscan-client:latest
       options: --memory=4g
     env:
       HOME: /opt/fortify
@@ -68,11 +68,11 @@ jobs:
             --scan "code/" \
             --format HTML,CSV \
             --out . \
-            --proxyserver=b2b-http.fpl.com \
+            --proxyserver=b2b-http.dhl.com \
             --proxyport=8080 \
-            --nonProxyHosts=*.fpl.com \
-            --cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz \
-            --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz
+            --nonProxyHosts=*.dhl.com \
+            --cveUrlModified=https://artifactory.dhl.com/nvd/nvdcve-1.1-modified.json.gz \
+            --cveUrlBase=https://artifactory.dhl.com/nvd/nvdcve-1.1-%d.json.gz
 
       - name: Archive Reports
         uses: actions/upload-artifact@v3
@@ -81,3 +81,4 @@ jobs:
           path: |
             dependency-check-report.html
             dependency-check-report.csv
+			
