@@ -22,6 +22,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Cache Dependency-Check Data
+        uses: actions/cache@v3
+        with:
+          path: ./dependency-check-data
+          key: dependency-check-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            dependency-check-${{ runner.os }}-
+
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
