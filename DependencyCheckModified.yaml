@@ -68,11 +68,6 @@ jobs:
             fi
           done
 
-      - name: Prepare Dependency-Check Config
-        run: |
-          echo "cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz" > dependency-check.properties
-          echo "cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz" >> dependency-check.properties
-
       - name: Run Dependency Check
         run: |
           chmod 755 ./tools/dependency-check/bin/*
@@ -87,9 +82,6 @@ jobs:
             --format CSV \
             --format JSON \
             --out . \
-            --proxyserver=b2b-http.fpl.com \
-            --proxyport=8080 \
-            --nonProxyHosts=*.fpl.com \
             --propertyfile dependency-check.properties || true
 
       - name: Archive Reports
