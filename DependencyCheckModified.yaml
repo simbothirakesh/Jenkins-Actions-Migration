@@ -95,6 +95,9 @@ jobs:
       - name: Connectivity Test to NVD API
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+          # FIX: Set proxy environment variables for curl
+          http_proxy: http://b2b-http.fpl.com:8080
+          https_proxy: http://b2b-http.fpl.com:8080
         run: |
           echo "🌐 Testing connectivity to NVD API..."
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
