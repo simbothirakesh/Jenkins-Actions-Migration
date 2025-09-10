@@ -6,7 +6,7 @@
 cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz
 cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz
 
-# Cache directory (will be persisted with GitHub Actions cache)
+# Directory to store cached CVE data locally on the runner
 dataDirectory=./dependency-check-data
 
 # Disable direct updates from nvd.nist.gov
