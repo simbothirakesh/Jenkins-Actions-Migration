@@ -90,7 +90,11 @@ jobs:
             --format CSV \
             --format JSON \
             --out . \
-            --propertyfile $GITHUB_WORKSPACE/dependency-check.properties || true
+            --nvdApiKey "${{ secrets.NVD_API_KEY }}" \
+            --data ./dependency-check-data \
+            --proxyserver b2b-http.fpl.com \
+            --proxyport 8080 \
+            --nonProxyHosts *.fpl.com || true
 
       - name: Archive Reports
         uses: actions/upload-artifact@v3
@@ -100,9 +104,3 @@ jobs:
             dependency-check-report.html
             dependency-check-report.csv
             dependency-check-report.json
-
-      - name: Show CVE DB Info
-        if: always()
-        run: |
-          echo "===== Dependency-Check DB Metadata ====="
-          grep "NVD CVE" dependency-check-report.json || true
