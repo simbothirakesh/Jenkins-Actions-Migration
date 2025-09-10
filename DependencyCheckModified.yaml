@@ -62,9 +62,16 @@ jobs:
           mkdir -p code/staticresources_extracted
           for f in code/staticresources/*.resource; do
             if [ -f "$f" ]; then
-              jar -xf "$f" -C "code/staticresources_extracted/$(basename "$f" .resource)" || true
+              outdir="code/staticresources_extracted/$(basename "$f" .resource)"
+              mkdir -p "$outdir"
+              jar -xf "$f" -C "$outdir" || true
             fi
           done
+
+      - name: Prepare Dependency-Check Config
+        run: |
+          echo "cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz" > dependency-check.properties
+          echo "cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz" >> dependency-check.properties
 
       - name: Run Dependency Check
         run: |
@@ -74,7 +81,7 @@ jobs:
             --scan "code/" \
             --exclude "**/aura/**" \
             --exclude "**/lwc/**" \
-            --scan "code/staticresources/" \
+            --scan "code/staticresources_extracted/" \
             --disableOssIndex \
             --format HTML \
             --format CSV \
@@ -83,8 +90,7 @@ jobs:
             --proxyserver=b2b-http.fpl.com \
             --proxyport=8080 \
             --nonProxyHosts=*.fpl.com \
-            --cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz \
-            --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz
+            --propertyfile dependency-check.properties || true
 
       - name: Archive Reports
         uses: actions/upload-artifact@v3
