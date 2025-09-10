@@ -15,7 +15,7 @@ jobs:
     env:
       HOME: /opt/fortify
       SCA_VM_OPTS: -Xmx2750M
-      # JVM proxy settings applied globally for Dependency-Check
+      # JVM proxy settings applied globally
       JAVA_TOOL_OPTIONS: >
         -Duser.home=/opt/fortify
         -Dhttp.proxyHost=b2b-http.fpl.com
@@ -97,10 +97,9 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           echo "🌐 Testing connectivity to NVD API..."
-          curl -s -o /dev/null -w "%{http_code}" \
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "apiKey: $NVD_API_KEY" \
-            "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1" > status.txt
-          STATUS=$(cat status.txt)
+            "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1")
           if [ "$STATUS" != "200" ]; then
             echo "❌ Failed to reach NVD API (HTTP $STATUS)"
             exit 1
