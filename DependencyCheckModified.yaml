@@ -15,7 +15,14 @@ jobs:
     env:
       HOME: /opt/fortify
       SCA_VM_OPTS: -Xmx2750M
-      JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
+      # JVM proxy settings applied globally for Dependency-Check
+      JAVA_TOOL_OPTIONS: >
+        -Duser.home=/opt/fortify
+        -Dhttp.proxyHost=b2b-http.fpl.com
+        -Dhttp.proxyPort=8080
+        -Dhttps.proxyHost=b2b-http.fpl.com
+        -Dhttps.proxyPort=8080
+        -Dhttp.nonProxyHosts=*.fpl.com
       BUILD_ID: salesforce-${{ github.run_id }}
 
     steps:
@@ -85,6 +92,22 @@ jobs:
             echo "✅ NVD_API_KEY is set (not printing for security)."
           fi
 
+      - name: Connectivity Test to NVD API
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          echo "🌐 Testing connectivity to NVD API..."
+          curl -s -o /dev/null -w "%{http_code}" \
+            -H "apiKey: $NVD_API_KEY" \
+            "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1" > status.txt
+          STATUS=$(cat status.txt)
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ Failed to reach NVD API (HTTP $STATUS)"
+            exit 1
+          else
+            echo "✅ Successfully reached NVD API (HTTP $STATUS)"
+          fi
+
       - name: Run Dependency Check
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
@@ -102,10 +125,7 @@ jobs:
             --format JSON \
             --out . \
             --nvdApiKey "$NVD_API_KEY" \
-            --data ./dependency-check-data \
-            --proxyserver b2b-http.fpl.com \
-            --proxyport 8080 \
-            --nonProxyHosts *.fpl.com || true
+            --data ./dependency-check-data || true
 
       - name: Archive Reports
         uses: actions/upload-artifact@v3
