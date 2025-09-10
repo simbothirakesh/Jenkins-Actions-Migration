@@ -1,0 +1,20 @@
+###############################################################################
+# Dependency-Check Configuration Properties
+###############################################################################
+
+# Base URL for NVD CVE JSON data (annual feeds)
+cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz
+
+# URL for the "modified" feed (recent updates)
+cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz
+
+# Directory to store cached CVE data locally on the runner
+dataDirectory=./dependency-check-data
+
+# Disable automatic updates from nvd.nist.gov (use internal mirror only)
+autoupdate=false
+
+# Proxy settings (corporate network)
+proxyserver=b2b-http.fpl.com
+proxyport=8080
+nonProxyHosts=*.fpl.com
