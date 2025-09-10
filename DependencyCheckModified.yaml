@@ -91,23 +91,27 @@ jobs:
             echo "✅ NVD_API_KEY is set (not printing for security)."
           fi
 
-      - name: Connectivity Test to NVD API
+      - name: Connectivity Test to NVD API (Non-blocking)
+        continue-on-error: true
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
           http_proxy: http://b2b-http.fpl.com:8080
           https_proxy: http://b2b-http.fpl.com:8080
         run: |
           echo "🌐 Testing connectivity to NVD API..."
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "apiKey: $NVD_API_KEY" \
-            -H "User-Agent: MeinService-CICD/1.0 (devops-team@fpl.com)" \
-            "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1")
-          if [ "$STATUS" != "200" ]; then
-            echo "❌ Failed to reach NVD API (HTTP $STATUS)"
-            exit 1
-          else
-            echo "✅ Successfully reached NVD API (HTTP $STATUS)"
-          fi
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "apiKey: $NVD_API_KEY" \
+              -H "User-Agent: MeinService-CICD/1.0 (devops-team@fpl.com)" \
+              "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Successfully reached NVD API (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "⚠️ Attempt $i failed (HTTP $STATUS). Retrying in 10s..."
+            sleep 10
+          done
+          echo "⚠️ Failed to reach NVD API after 3 attempts. Continuing anyway..."
 
       - name: Run Dependency Check
         env:
@@ -127,7 +131,7 @@ jobs:
             --out . \
             --nvdApiKey "$NVD_API_KEY" \
             --data ./dependency-check-data \
-            --cveValidForHours 24 || true
+            --cveValidForHours 72 || true
 
       - name: Archive Reports
         uses: actions/upload-artifact@v3
