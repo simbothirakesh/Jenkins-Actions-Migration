@@ -1,14 +1,14 @@
 name: Fortify Scan - MeinService TL
 
 on:
-  workflow_dispatch:   # manual trigger only
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   fortify:
-    runs-on: ubuntu-latest
+    runs-on: arc-small-container
     container:
       image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
       options: --memory=4g
@@ -40,7 +40,13 @@ jobs:
         run: |
           mkdir -p code
           sf project retrieve start \
-            --metadata ApexClass,ApexTrigger,ApexPage,ApexComponent,LightningComponentBundle,AuraDefinitionBundle,StaticResource \
+            --metadata ApexClass \
+            --metadata ApexTrigger \
+            --metadata ApexPage \
+            --metadata AuraDefinitionBundle \
+            --metadata LightningComponentBundle \
+            --metadata ApexComponent \
+            --metadata StaticResource \
             --target-org tl-org \
             --output-dir code
 
@@ -51,11 +57,13 @@ jobs:
           rm -f code/classes/**/Test_*.cls*
           rm -f code/classes/*.xml || true
 
-      - name: Extract static resources (using jar)
+      - name: Extract static resources
         run: |
-          for file in code/staticresources/*.resource; do
-            [ -f "$file" ] || continue
-            jar xf "$file"
+          mkdir -p code/staticresources_extracted
+          for f in code/staticresources/*.resource; do
+            if [ -f "$f" ]; then
+              jar -xf "$f" -C "code/staticresources_extracted/$(basename "$f" .resource)" || true
+            fi
           done
 
       - name: Run Dependency Check
@@ -68,27 +76,21 @@ jobs:
             --exclude "**/lwc/**" \
             --scan "code/staticresources/" \
             --disableOssIndex \
+            --format HTML \
+            --format CSV \
+            --format JSON \
             --out . \
             --proxyserver=b2b-http.fpl.com \
             --proxyport=8080 \
             --nonProxyHosts=*.fpl.com \
             --cveUrlModified=https://artifactory.fpl.com/nvd/nvdcve-1.1-modified.json.gz \
-            --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz || true
+            --cveUrlBase=https://artifactory.fpl.com/nvd/nvdcve-1.1-%d.json.gz
 
-      - name: Upload Dependency Check HTML Report
-        uses: actions/upload-artifact@v4
+      - name: Archive Reports
+        uses: actions/upload-artifact@v3
         with:
-          name: dependency-check-report-html
-          path: dependency-check-report.html
-
-      - name: Upload Dependency Check CSV Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-check-report-csv
-          path: dependency-check-report.csv
-
-      - name: Upload Dependency Check JSON Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-check-report-json
-          path: dependency-check-report.json
+          name: dependency-check-reports
+          path: |
+            dependency-check-report.html
+            dependency-check-report.csv
+            dependency-check-report.json
