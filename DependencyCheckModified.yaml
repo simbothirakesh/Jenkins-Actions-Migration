@@ -8,30 +8,19 @@ permissions:
 
 jobs:
   fortify:
-    runs-on: ubuntu-latest
+    runs-on: arc-small-container
+    container:
+      image: docker.artifactory.dhl.com/fortify/fortify-cloudscan-client:latest
+      options: --memory=4g
     env:
       HOME: /opt/fortify
       SCA_VM_OPTS: -Xmx2750M
-      JAVA_TOOL_OPTIONS: >
-        -Duser.home=/opt/fortify
-        -Dhttp.proxyHost=b2b-http.fpl.com
-        -Dhttp.proxyPort=8080
-        -Dhttps.proxyHost=b2b-http.fpl.com
-        -Dhttps.proxyPort=8080
-        -Dhttp.nonProxyHosts=*.fpl.com
+      JAVA_TOOL_OPTIONS: -Duser.home=/opt/fortify
       BUILD_ID: salesforce-${{ github.run_id }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Cache Dependency-Check Data
-        uses: actions/cache@v3
-        with:
-          path: ./dependency-check-data
-          key: dependency-check-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            dependency-check-${{ runner.os }}-
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -51,15 +40,13 @@ jobs:
         run: |
           mkdir -p code
           sf project retrieve start \
-            --metadata ApexClass \
             --metadata ApexTrigger \
+            --metadata ApexClass \
             --metadata ApexPage \
             --metadata AuraDefinitionBundle \
             --metadata LightningComponentBundle \
             --metadata ApexComponent \
-            --metadata StaticResource \
-            --target-org tl-org \
-            --output-dir code
+            --metadata StaticResource
 
       - name: Remove Test Classes from Fortify Scan
         run: |
@@ -79,60 +66,21 @@ jobs:
             fi
           done
 
-      - name: Pre-flight Check for NVD API Key
-        run: |
-          if [ -z "${{ secrets.NVD_API_KEY }}" ]; then
-            echo "❌ NVD_API_KEY is NOT set! Please add it as a GitHub Secret."
-            exit 1
-          else
-            echo "✅ NVD_API_KEY is set (not printing for security)."
-          fi
-
-      - name: Install Dependency-Check (latest)
-        run: |
-          curl -L https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip -o dc.zip
-          unzip dc.zip -d ./tools
-          chmod +x ./tools/dependency-check/bin/dependency-check.sh
-
-      - name: Connectivity Test to NVD API (Non-blocking)
-        continue-on-error: true
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        run: |
-          echo "🌐 Testing connectivity to NVD API..."
-          for i in 1 2 3; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "apiKey: $NVD_API_KEY" \
-              -H "User-Agent: MeinService-CICD/1.0 (devops-team@fpl.com)" \
-              "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1")
-            if [ "$STATUS" = "200" ]; then
-              echo "✅ Successfully reached NVD API (HTTP $STATUS)"
-              exit 0
-            fi
-            echo "⚠️ Attempt $i failed (HTTP $STATUS). Retrying in 10s..."
-            sleep 10
-          done
-          echo "⚠️ Failed to reach NVD API after 3 attempts. Continuing anyway..."
-
       - name: Run Dependency Check
-        continue-on-error: true
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
+          chmod 755 ./tools/dependency-check/bin/*
           ./tools/dependency-check/bin/dependency-check.sh \
             --project "MeinServiceTL" \
             --scan "code/" \
+            --proxyserver=b2b-http.dhl.com \
+            --disableOssIndex \
             --exclude "**/aura/**" \
             --exclude "**/lwc/**" \
-            --scan "code/staticresources_extracted/" \
-            --disableOssIndex \
             --format HTML \
             --format CSV \
             --format JSON \
-            --out . \
-            --nvdApiKey "$NVD_API_KEY" \
-            --data ./dependency-check-data \
-            --cveValidForHours 72 || true
+            --proxyport=8080 \
+            --nonProxyHosts=*.dhl.com
 
       - name: Archive Reports
         uses: actions/upload-artifact@v3
