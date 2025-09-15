@@ -1,4 +1,4 @@
-name: Fortify Scan - SFDC (SF CLI Retrieve + Scan)
+name: Fortify Scan - Salesforce
 
 on:
   workflow_dispatch:
@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   fortify:
-    runs-on: arc-container-small
+    runs-on: arc-small-container
     container:
-      image: docker.artifactory.fpl.com/fortify/fortify-cloudscan-client:latest
+      image: docker.artifactory.dhl.com/fortify/fortify-cloudscan-client:latest
       options: --memory=4g
     env:
       HOME: /opt/fortify
@@ -59,7 +59,7 @@ jobs:
           test -d /opt/fortify/bin || { echo "::error::/opt/fortify/bin not found"; exit 1; }
           echo "/opt/fortify/bin" >> "$GITHUB_PATH"
 
-      - name: Select org alias (RQA for QA input)
+      - name: Select org alias
         shell: bash
         run: |
           if [[ "${{ github.event.inputs.environment }}" == "QA" ]]; then
@@ -79,7 +79,7 @@ jobs:
             echo "ORG_ALIAS=tl-org" >> "$GITHUB_ENV"
           fi
 
-      - name: Authenticate to Salesforce (SFDX URL)
+      - name: Authenticate to Salesforce
         shell: bash
         run: |
           set -euo pipefail
@@ -92,7 +92,12 @@ jobs:
         run: |
           mkdir -p code
           sf project retrieve start \
-            --metadata "ApexClass,ApexTrigger,ApexPage,AuraDefinitionBundle,LWCResource,StaticResource" \
+            --metadata ApexTrigger \
+            --metadata ApexClass \
+            --metadata ApexPage \
+            --metadata AuraDefinitionBundle \
+            --metadata LightningComponentBundle \
+            --metadata ApexComponent \
             --target-org "$ORG_ALIAS" \
             --output-dir "code"
 
@@ -120,6 +125,11 @@ jobs:
           else
             echo "BIRTReportGenerator not available; skipping PDF"
           fi
+      
+      - name: Generate DHL Audit Excel Report
+        shell: bash
+        run: |
+          java -jar ./tools/csv-to-excel/exceliser.jar ./low.csv ./medium.csv ./high.csv ./critical.csv ./dhl-audit.xlsx "${{ env.ORG }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
@@ -130,6 +140,7 @@ jobs:
             high.csv
             medium.csv
             low.csv
+            dhl-audit.xlsx
             FortifyReport.pdf
             target/fortify/translate.log
             target/fortify/scan.log
