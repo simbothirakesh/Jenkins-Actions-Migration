@@ -1,0 +1,45 @@
+1. Migration Overview
+•	What were the key steps taken during the migration from Jenkins to GitHub Actions? 
+•	Were there any security-focused changes or challenges encountered?
+•	How has the removal of Jenkins been handled (e.g., decommissioning servers, data migration)? 
+•	Are there any lingering Jenkins components or dependencies?
+•	Can you share an overview of a typical CI/CD workflow YAML file that includes Fortify integration?
+
+2. Access Control and Authentication
+•	How are permissions configured in GitHub for repositories, workflows, and runners (e.g., RBAC, branch protection rules)?
+•	Who has access to trigger or modify workflows involving Fortify? 
+•	Is multi-factor authentication (MFA) enforced for all users?
+•	How do you handle service accounts or API tokens for Fortify and GitHub Actions? Are they rotated regularly?
+
+3. Secrets Management
+•	How are sensitive credentials (e.g., Fortify API keys, deployment secrets) stored and managed in GitHub Actions (e.g., GitHub Secrets, external vaults like HashiCorp Vault)?
+•	What measures prevent secrets from being exposed in logs, artifacts, or public repos?
+•	Have you enabled GitHub's secret scanning features, and how do you respond to any alerts?
+
+4. Workflow and Pipeline Security
+•	Are workflows running on hosted or self-hosted runners? 
+•	What security hardening has been applied (e.g., for self-hosted: OS patches, least-privilege users)?
+•	How do you protect against supply chain risks, such as vetting and pinning third-party GitHub Actions (including any for Fortify)?
+•	What controls are in place for workflow triggers (e.g., requiring approvals for PRs, protecting against malicious events)?
+•	How are dependencies in workflows scanned for vulnerabilities (e.g., using Dependabot or similar tools)?
+
+5. Fortify Integration Specifics
+•	How is Fortify triggered and configured in GitHub Actions (e.g., via official actions, custom scripts, scan parameters like rulesets or exclusions)?
+•	What happens if a Fortify scan fails (e.g., does it block builds/deploys? How are results reported and triaged)?
+•	How do you ensure Fortify scan results (which may contain sensitive vuln details) are securely stored, shared, and redacted?
+•	Has the Fortify integration been tested for compatibility and efficacy compared to the Jenkins setup (e.g., same vuln detection rates)?
+
+6. Monitoring, Logging, and Incident Response
+•	What logging is enabled for GitHub Actions and Fortify (e.g., audit logs, run logs)? 
+•	How are they monitored and retained?
+•	How do you detect and alert on anomalies, such as unauthorized workflow triggers or scan failures?
+•	What is the incident response process for security issues in the pipeline (e.g., leaked secrets, compromised runners)?
+•	Are there any integrations with monitoring tools (e.g., SIEM like Splunk, or GitHub alerts)?
+
+7. Best Practices and Risks
+•	What security best practices from GitHub (e.g., OIDC for permissions, environments for deployments) have been implemented?
+•	Have you conducted any security testing on the new setup (e.g., workflow scanning with Checkov, penetration testing)?
+•	What are the top security risks you've identified in this migration, and how are they being mitigated?
+•	How do you ensure compliance with relevant standards (e.g., SOC 2, internal policies) in the new GitHub Actions environment?
+•	What training or documentation exists for the team on secure use of GitHub Actions and Fortify?
+•	Are there plans for ongoing reviews or audits of the pipelines (e.g., quarterly scans)?
