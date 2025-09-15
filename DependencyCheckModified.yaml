@@ -1,4 +1,5 @@
-name: Fortify Scan - MeinService TL
+
+name: Dependency Scan - MeinService TL
 
 on:
   workflow_dispatch:
@@ -38,15 +39,18 @@ jobs:
 
       - name: Retrieve Metadata
         run: |
-          mkdir -p code
+          mkdir -p ../code
+          cd tools
           sf project retrieve start \
-            --metadata ApexTrigger \
             --metadata ApexClass \
+            --metadata ApexTrigger \
             --metadata ApexPage \
             --metadata AuraDefinitionBundle \
             --metadata LightningComponentBundle \
             --metadata ApexComponent \
-            --metadata StaticResource
+            --metadata StaticResource \
+            --target-org tl-org \
+            --output-dir ../code
 
       - name: Remove Test Classes from Fortify Scan
         run: |
@@ -60,9 +64,7 @@ jobs:
           mkdir -p code/staticresources_extracted
           for f in code/staticresources/*.resource; do
             if [ -f "$f" ]; then
-              outdir="code/staticresources_extracted/$(basename "$f" .resource)"
-              mkdir -p "$outdir"
-              jar -xf "$f" -C "$outdir" || true
+              jar -xf "$f" -C "code/staticresources_extracted/$(basename "$f" .resource)" || true
             fi
           done
 
@@ -72,15 +74,18 @@ jobs:
           ./tools/dependency-check/bin/dependency-check.sh \
             --project "MeinServiceTL" \
             --scan "code/" \
-            --proxyserver=b2b-http.dhl.com \
-            --disableOssIndex \
             --exclude "**/aura/**" \
             --exclude "**/lwc/**" \
+            --scan "code/staticresources/" \
+            --disableOssIndex \
             --format HTML \
             --format CSV \
             --format JSON \
+            --out . \
+            --proxyserver=b2b-http.dhl.com \
             --proxyport=8080 \
-            --nonProxyHosts=*.dhl.com
+            --nonProxyHosts=*.dhl.com \
+            --nvdDatafeed "https://artifactory.dhl.com/nvd/"  
 
       - name: Archive Reports
         uses: actions/upload-artifact@v3
